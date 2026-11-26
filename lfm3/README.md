@@ -51,7 +51,7 @@ Risultati del 26 novembre 2026:
 
 Con un solo token, ogni blocco coincide con il riferimento entro 1e-7-1e-6 relativo, salvo due MLP con un arrotondamento al confine a 3e-5. La risposta a `What is the capital of France?` coincide token per token con il riferimento e con pithos.
 
-Con il template ufficiale il modello Q4_K_M a volte chiude un ragionamento inesistente e ripete la risposta, ad esempio `Il colore azzurro.</think>Il colore azzurro.`; tutti i 14 token sono l'argmax del riferimento FP32, quindi il comportamento appartiene al modello. In una risposta della chat e comparso un carattere di sostituzione U+FFFD al posto di una lettera accentata; la decodifica coincide con quella ufficiale nei test, ma questo caso non e ancora stato isolato.
+Con il template ufficiale il modello Q4_K_M a volte chiude un ragionamento inesistente e ripete la risposta, ad esempio `Il colore azzurro.</think>Il colore azzurro.`; tutti i 14 token sono l'argmax del riferimento FP32, quindi il comportamento appartiene al modello. La chat scrive le risposte su stdout e le etichette su stderr. Leggendo i due flussi da pipe separate, come fa un terminale remoto o uno strumento che li riassembla a blocchi, un messaggio di stato puo inserirsi fra i byte di un carattere UTF-8 e apparire come U+FFFD. Con lo stesso input e i flussi su file, separati o uniti, l'uscita e UTF-8 valido senza caratteri di sostituzione.
 
 ## Riferimento FP32
 
