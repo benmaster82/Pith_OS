@@ -1,4 +1,7 @@
 ; Bare-metal backend. No Linux ABI and no guest filesystem.
+%ifndef OS_BANNER
+%define OS_BANNER "LFM bare-metal x86-64 | BF16"
+%endif
 %include "boot_bundle.inc"
 extern boot_info, __kernel_end
 global os_entry, write_all, exit
@@ -506,7 +509,7 @@ exit:
 
 section .rodata
 BUNDLE_HEADER
-os_banner: db "LFM bare-metal x86-64 | BF16",10,0
+os_banner: db OS_BANNER,10,0
 os_avx: db "Kernel ready: AVX2/FMA",10,0
 os_scalar: db "Kernel ready: scalar SSE2",10,0
 os_error: db "FATAL: invalid boot module, model, memory map or arguments",10,0

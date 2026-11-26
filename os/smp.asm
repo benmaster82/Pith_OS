@@ -1,5 +1,8 @@
 ; xAPIC startup and persistent workers. All kernel/model addresses are identity
 ; mapped below 4 GiB. Unsupported firmware/APIC configurations keep one core.
+%ifndef AP_FEATURES
+%define AP_FEATURES 0x18001000      ; CPUID.1:ECX FMA, OSXSAVE, AVX of the AVX2 kernels
+%endif
 %define MAX_THREADS 16
 extern ap_trampoline_start, ap_trampoline_end, page_directories, idt_pointer
 global ap_entry
@@ -410,8 +413,8 @@ ap_entry:
     ; A heterogeneous processor that cannot run the selected kernel stays parked.
     mov eax,1
     cpuid
-    and ecx,0x18001000
-    cmp ecx,0x18001000
+    and ecx,AP_FEATURES
+    cmp ecx,AP_FEATURES
     jne .park
     xor ecx,ecx
     xgetbv

@@ -163,3 +163,39 @@ verify-lfm3: build/lfm3/lfm3-next build/lfm3/lfm3-logits build/lfm3/lfm3-layers
 
 verify-lfm3-tokenizer: build/lfm3/lfm3-next
 	$(PYTHON) lfm3/verify_tokenizer.py "$(LFM3_TOKENIZER)" build/lfm3/lfm3-next
+
+# Pithos CORE: the LFM3 runtime as a standalone Multiboot kernel, with the GGUF
+# and tokenizer tables in one boot module.
+LFM3_BUNDLE ?= build/lfm3/lfm3-boot.bundle
+LFM3_OS_IMAGE ?= build/lfm3/pithos-core.iso
+LFM3_OS_SOURCES = $(LFM3_SOURCES) os/platform.asm os/multiboot.asm os/smp.asm os/console.asm \
+	build/lfm3/boot_bundle.inc build/console-font.bin
+.PHONY: lfm3-os lfm3-os-image verify-lfm3-os
+lfm3-os: build/lfm3/lfm3-os.elf $(LFM3_BUNDLE)
+
+lfm3-os-image: $(LFM3_OS_IMAGE)
+
+$(LFM3_BUNDLE) build/lfm3/boot_bundle.inc &: os/bundle.py $(LFM3_MODEL) build/lfm3/tokenizer.bin build/lfm3/layout.inc | build/lfm3
+	$(PYTHON) os/bundle.py "$(LFM3_MODEL)" build/lfm3/tokenizer.bin "$(LFM3_BUNDLE)" build/lfm3/boot_bundle.inc
+
+build/lfm3/os-main.o: $(LFM3_OS_SOURCES)
+	$(NASM) -f elf64 -DBARE_METAL -Ibuild/lfm3/ -Ibuild/ lfm3/main.asm -o $@
+
+build/lfm3/os-logits.o: $(LFM3_OS_SOURCES)
+	$(NASM) -f elf64 -DBARE_METAL -DDUMP_LOGITS -Ibuild/lfm3/ -Ibuild/ lfm3/main.asm -o $@
+
+build/lfm3/lfm3-os.elf64: build/os-boot.o build/lfm3/os-main.o os/linker.ld
+	$(LD) -m elf_x86_64 -T os/linker.ld -z max-page-size=0x1000 -o $@ build/os-boot.o build/lfm3/os-main.o
+
+build/lfm3/lfm3-os-logits.elf64: build/os-boot.o build/lfm3/os-logits.o os/linker.ld
+	$(LD) -m elf_x86_64 -T os/linker.ld -z max-page-size=0x1000 -o $@ build/os-boot.o build/lfm3/os-logits.o
+
+build/lfm3/%.elf: build/lfm3/%.elf64
+	objcopy -O elf32-i386 $< $@
+
+$(LFM3_OS_IMAGE): build/lfm3/lfm3-os.elf $(LFM3_BUNDLE) os/image.py os/FONT-LICENSE.txt
+	$(PYTHON) os/image.py build/lfm3/lfm3-os.elf "$(LFM3_BUNDLE)" "$(LFM3_OS_IMAGE)" --title "Pithos CORE" \
+		--options "mode=chat tokens=256 context=4096 threads=6"
+
+verify-lfm3-os: lfm3-os build/lfm3/lfm3-os-logits.elf build/lfm3/lfm3-next build/lfm3/lfm3-logits
+	$(PYTHON) lfm3/verify_os.py "$(LFM3_MODEL)" "$(LFM3_BUNDLE)"

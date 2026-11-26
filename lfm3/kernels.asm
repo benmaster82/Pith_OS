@@ -23,6 +23,7 @@ init_kernels:
     test ebx,1<<5
     jz .unsupported
     mov byte [vector_math],1
+    mov qword [matvec_impl],matvec_avx2
     pop rbx
     ret
 .unsupported:
@@ -218,6 +219,9 @@ matvec_q4k:
 ; rdi = Q8_K input, rsi = rows, rdx = output, ecx = width, r8d = rows,
 ; r9 = kernel, r10d = bytes per 256-value weight block. Rows are partitioned
 ; across workers; each row's arithmetic does not depend on the partition.
+; The bare-metal platform and SMP code recognise the AVX2 path by
+; matvec_impl == matvec_avx2; for LFM3 it names the quantized dispatcher.
+matvec_avx2:
 qmatvec:
     cmp dword [thread_count],1
     je .direct

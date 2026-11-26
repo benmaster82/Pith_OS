@@ -27,6 +27,21 @@ Misure del 27 novembre 2026 su Intel Core i5-10500H, WSL2 con quattro CPU visibi
 
 Sulla stessa macchina pithos su Windows, con `-t 4`, ha elaborato lo stesso prompt a 55,7-61,9 token/s, avvio escluso, e generato a 19,0-21,4 token/s; con sei thread 67-68 e 22 token/s. La generazione e limitata dalla banda di memoria: ogni token legge circa 1 GB di pesi.
 
+## Pithos CORE: il kernel autonomo
+
+Lo stesso runtime si compila come kernel Multiboot, Pithos CORE, con piattaforma, avvio dei processori e console del kernel di LFM2.5. Il modulo di avvio contiene il GGUF e le tabelle del tokenizer senza conversione, 1.112.152.240 byte.
+
+~~~sh
+make lfm3-os LFM3_MODEL=LFM3-1.7B-Q4_K_M.gguf LFM3_TOKENIZER=/opt/lfm3-ref/tokenizer.json
+python3 os/run.py --kernel build/lfm3/lfm3-os.elf build/lfm3/lfm3-boot.bundle --cpus 4 --threads 4
+make lfm3-os-image LFM3_MODEL=LFM3-1.7B-Q4_K_M.gguf LFM3_TOKENIZER=/opt/lfm3-ref/tokenizer.json
+python3 os/run.py --iso build/lfm3/pithos-core.iso --cpus 4 --display gtk
+~~~
+
+L'immagine `build/lfm3/pithos-core.iso` avvia la chat con 256 token per risposta, contesto 4.096 e al massimo sei processori. Con 2 GiB di RAM restano circa 0,9 GiB per la cache, cioè circa 20.000 posizioni; il contesto di 32.768 posizioni richiede 3 GiB. Oltre ad AVX2 e FMA, i processori secondari devono offrire F16C; quelli che non lo offrono restano fermi.
+
+`make verify-lfm3-os` confronta il kernel in QEMU/KVM con l'eseguibile Linux: il bundle conserva GGUF e tabelle, cinque sequenze greedy e tre risposte testuali coincidono, la sequenza di 64 token coincide con 2, 3, 4 e 6 processori attivi, e tutti i 128.000 logit sono identici bit per bit con 1 e 4 processori. Sono verificati anche la chat seriale con cronologia, backspace, input non valido e `/clear`, la capacita esatta della cache, il rifiuto delle CPU senza AVX2, F16C o XSAVE, le opzioni non valide, il modulo mancante o corrotto e la RAM insufficiente.
+
 ## Implementazione
 
 - `layout.py` legge il GGUF in fase di build, verifica metadati, forme e tipi di tutti i 287 tensori e genera offset, tipi e la sequenza degli strati presa dal checkpoint. L'eseguibile controlla all'avvio un hash FNV-1a dell'intestazione GGUF, 8.247.328 byte.

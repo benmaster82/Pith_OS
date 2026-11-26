@@ -17,7 +17,13 @@ default abs
 %define PREFILL_BLOCK 15            ; prompt tokens per weight pass
 %endif
 section .text
+%ifdef BARE_METAL
+%define OS_BANNER "Pithos CORE x86-64 | LFM3-1.7B Q4_K_M"
+%define AP_FEATURES 0x38001000      ; the AVX2 kernels also need F16C on every core
+%include "os/platform.asm"
+%else
 %include "platform_linux.asm"
+%endif
 
 ; The GGUF header up to the tensor data: magic, metadata and tensor table.
 validate_model:
@@ -490,7 +496,11 @@ block_residual:
 
 %include "lfm3/kernels.asm"
 %include "expmath.asm"
+%ifdef BARE_METAL
+%include "os/smp.asm"
+%else
 %include "threads.asm"
+%endif
 %include "tokenizer.asm"
 %include "chat.asm"
 section .rodata
@@ -565,7 +575,7 @@ conv_cache: resb CONV_STATE_BYTES
 scratch: resd 1
 number: resb 8
 section .data
-matvec_impl: dq 0                   ; the LFM2 matvec entry of run_job, unused here
+matvec_impl: dq 0                   ; set to matvec_avx2 by init_kernels; run_job is unused
 max_new_tokens: dd 1
 context_limit: dd 512
 section .note.GNU-stack noalloc noexec nowrite progbits

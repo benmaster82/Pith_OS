@@ -14,7 +14,10 @@ def main():
     parser.add_argument("bundle", type=Path)
     parser.add_argument("output", type=Path)
     parser.add_argument("--options", default="mode=chat tokens=64 context=2048 threads=6")
+    parser.add_argument("--title", default="LFM2.5 BF16", help="GRUB menu entry")
     args = parser.parse_args()
+    if not re.fullmatch(r"[A-Za-z0-9 ._()+-]+", args.title):
+        parser.error("The title may contain letters, digits, spaces and ._()+-")
     if not re.fullmatch(r"(?:mode=(?:chat|ids|text)|(?:tokens|context|threads)=[0-9]+)(?: (?:mode=(?:chat|ids|text)|(?:tokens|context|threads)=[0-9]+))*", args.options):
         parser.error("Options must contain only mode, tokens, context and threads assignments")
     options = dict(part.split("=", 1) for part in args.options.split())
@@ -44,7 +47,7 @@ def main():
         (boot / "grub/grub.cfg").write_text(
             'set timeout=0\nset default=0\ninsmod all_video\n'
             'set gfxmode=1024x768x32,auto\nset gfxpayload=keep\n'
-            'menuentry "LFM2.5 BF16" {\n'
+            f'menuentry "{args.title}" {{\n'
             f'  multiboot2 /boot/lfm-os.elf {args.options}\n'
             '  module2 /boot/lfm-boot.bundle\n  boot\n}\n')
         temporary = directory / "image.iso"
