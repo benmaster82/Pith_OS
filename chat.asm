@@ -1,6 +1,12 @@
 ; Context allocation and a line-oriented chat REPL. Linux separates status on
 ; stderr from responses on stdout; bare metal uses COM1. Validate before caching.
 section .text
+%ifndef EOS_ID
+%define EOS_ID 7                    ; official eos_token_id
+%define NEWLINE_ID 708              ; newline token after im_end
+%define KV_LAYERS 6                 ; attention layers with 4096-byte cache rows
+%define CONV_STATE_BYTES 10*8192
+%endif
 init_context:
     push r12
     mov r12,rdi
@@ -35,7 +41,7 @@ allocate_cache:
     mov esi,[context_limit]
     shl rsi,12
     mov [kv_stride],rsi
-    imul rsi,6
+    imul rsi,KV_LAYERS
     call allocate_pages
     cmp rax,-4095
     jae .error
@@ -115,19 +121,19 @@ chat_next_line:
     ; The generation loop leaves its final prediction unconsumed.
     mov eax,[next_token]
     call consume_token
-    cmp dword [next_token],7
+    cmp dword [next_token],EOS_ID
     je .newline_token
-    mov eax,7
+    mov eax,EOS_ID
     call consume_token
 .newline_token:
-    mov eax,708                 ; newline after assistant's im_end
+    mov eax,NEWLINE_ID          ; newline after assistant's im_end
     call consume_token
     mov [cache_position],r14d
     mov edi,1
     mov esi,chat_newline
     mov edx,1
     call write_all
-    cmp dword [next_token],7
+    cmp dword [next_token],EOS_ID
     je chat_next_line
     mov esi,limit_notice
     mov edx,limit_notice_len
@@ -139,7 +145,7 @@ chat_clear:
     mov dword [decode_length],0
     mov edi,conv_cache
     xor eax,eax
-    mov ecx,10*8192/8
+    mov ecx,CONV_STATE_BYTES/8
     rep stosq
     ; KV entries are overwritten before each read after position resets.
     mov esi,clear_notice

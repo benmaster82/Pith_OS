@@ -115,3 +115,51 @@ build/lfm-os-logits.elf64: build/os-boot.o build/os-logits.o os/linker.ld
 
 build/lfm-os-logits.elf: build/lfm-os-logits.elf64
 	objcopy -O elf32-i386 $< $@
+
+# LFM3-1.7B GGUF runtime. The tokenizer tables sit beside the executable.
+LFM3_MODEL ?= LFM3-1.7B-Q4_K_M.gguf
+LFM3_TOKENIZER ?= lfm3-ref/tokenizer.json
+LFM3_SOURCES = lfm3/main.asm lfm3/kernels.asm lfm3/frequencies.inc platform_linux.asm threads.asm \
+	tokenizer.asm chat.asm util.asm expmath.asm expmath_data.inc \
+	build/lfm3/layout.inc build/lfm3/lfm3-layers.inc build/lfm3/tokenizer.inc
+.PHONY: lfm3
+lfm3: build/lfm3/lfm3-next
+
+build/lfm3:
+	mkdir -p $@
+
+build/lfm3/layout.inc build/lfm3/lfm3-layers.inc &: FORCE lfm3/layout.py | build/lfm3
+	$(PYTHON) lfm3/layout.py "$(LFM3_MODEL)" build/lfm3/layout.inc.tmp build/lfm3/lfm3-layers.inc.tmp
+	cmp -s build/lfm3/layout.inc.tmp build/lfm3/layout.inc || cp build/lfm3/layout.inc.tmp build/lfm3/layout.inc
+	cmp -s build/lfm3/lfm3-layers.inc.tmp build/lfm3/lfm3-layers.inc || cp build/lfm3/lfm3-layers.inc.tmp build/lfm3/lfm3-layers.inc
+	rm -f build/lfm3/layout.inc.tmp build/lfm3/lfm3-layers.inc.tmp
+
+build/lfm3/tokenizer.bin build/lfm3/tokenizer.inc &: build_tokenizer.py $(LFM3_TOKENIZER) | build/lfm3
+	$(PYTHON) build_tokenizer.py "$(LFM3_TOKENIZER)" build/lfm3/tokenizer.bin build/lfm3/tokenizer.inc --vocab 128000 --hash-bits 19
+
+build/lfm3/main.o: $(LFM3_SOURCES)
+	$(NASM) -f elf64 -Ibuild/lfm3/ lfm3/main.asm -o $@
+
+build/lfm3/lfm3-next: build/lfm3/main.o build/lfm3/tokenizer.bin
+	$(LD) -static -z noexecstack -o $@ $<
+
+build/lfm3/logits.o: $(LFM3_SOURCES)
+	$(NASM) -f elf64 -DDUMP_LOGITS -Ibuild/lfm3/ lfm3/main.asm -o $@
+
+build/lfm3/lfm3-logits: build/lfm3/logits.o build/lfm3/tokenizer.bin
+	$(LD) -static -z noexecstack -o $@ $<
+
+# Diagnostic build: the embedding and every normalized block output, then the logits.
+build/lfm3/layers.o: $(LFM3_SOURCES)
+	$(NASM) -f elf64 -DDUMP_LAYERS -DDUMP_LOGITS -Ibuild/lfm3/ lfm3/main.asm -o $@
+
+build/lfm3/lfm3-layers: build/lfm3/layers.o build/lfm3/tokenizer.bin
+	$(LD) -static -z noexecstack -o $@ $<
+
+LFM3_REF ?= lfm3-ref
+.PHONY: verify-lfm3 verify-lfm3-tokenizer
+verify-lfm3: build/lfm3/lfm3-next build/lfm3/lfm3-logits build/lfm3/lfm3-layers
+	$(PYTHON) lfm3/verify.py "$(LFM3_MODEL)" "$(LFM3_REF)" build/lfm3/lfm3-next build/lfm3/lfm3-logits build/lfm3/lfm3-layers
+
+verify-lfm3-tokenizer: build/lfm3/lfm3-next
+	$(PYTHON) lfm3/verify_tokenizer.py "$(LFM3_TOKENIZER)" build/lfm3/lfm3-next

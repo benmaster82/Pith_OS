@@ -135,57 +135,7 @@ consume_token:
     inc r14d
     ret
 
-option_equal:
-    xor ecx,ecx
-.character:
-    mov al,[rsi+rcx]
-    cmp al,[rdi+rcx]
-    jne .different
-    inc ecx
-    test al,al
-    jnz .character
-    mov eax,1
-    ret
-.different:
-    xor eax,eax
-    ret
-
-print_id:
-    mov esi,number+7
-    mov byte [rsi],10
-    mov ecx,10
-.digit:
-    xor edx,edx
-    div ecx
-    add dl,'0'
-    dec rsi
-    mov [rsi],dl
-    test eax,eax
-    jnz .digit
-    mov edx,number+8
-    sub rdx,rsi
-    mov edi,1
-    jmp write_all
-
-; Parse a nonempty decimal string, bounded by ecx. Bounds are checked after
-; every digit, before another multiplication can overflow for our limits.
-parse_uint:
-    xor eax,eax
-    cmp byte [rsi],0
-    je fail
-.digit:
-    movzx edx,byte [rsi]
-    sub edx,'0'
-    cmp edx,9
-    ja fail
-    imul eax,10
-    add eax,edx
-    cmp eax,ecx
-    ja fail
-    inc rsi
-    cmp byte [rsi],0
-    jne .digit
-    ret
+%include "util.asm"
 
 %macro PROJECT 5
     mov edi,%1
@@ -457,24 +407,7 @@ inv8: dd 0.125
 one: dd 1.0
 minus80: dd -80.0
 plus80: dd 80.0
-align 32
-%macro LANES 2
-%1: times 8 dd %2
-%endmacro
-LANES exp_min8,-80.0
-LANES exp_max8,80.0
-LANES log2e8,1.44269504088896341
-LANES ln2_hi8,0.693359375
-LANES ln2_lo8,-2.12194440e-4
-LANES exp_p0,1.9875691500e-4
-LANES exp_p1,1.3981999507e-3
-LANES exp_p2,8.3334519073e-3
-LANES exp_p3,4.1665795894e-2
-LANES exp_p4,1.6666665459e-1
-LANES exp_p5,5.0000001201e-1
-LANES one8,1.0
-LANES exp_bias8,127
-lane_index8: dd 0,1,2,3,4,5,6,7
+%include "expmath_data.inc"
 freq:
 %include "frequencies.inc"
 chat_option: db "--chat",0

@@ -1,6 +1,57 @@
-# LFM3-1.7B: riferimento e note di porting
+# LFM3-1.7B: runtime e riferimento
 
-Questa cartella prepara il supporto a LiquidAI LFM3-1.7B in formato GGUF Q4_K_M. Il runtime assembly non lo supporta ancora; qui ci sono il riferimento numerico e le caratteristiche del modello che il porting deve rispettare.
+Questa cartella aggiunge il supporto a LiquidAI LFM3-1.7B in formato GGUF Q4_K_M: un eseguibile Linux in assembly, `lfm3-next`, il riferimento numerico e le verifiche. Il runtime condivide con quello di LFM2.5 piattaforma, thread, tokenizer e chat; il kernel autonomo non lo supporta ancora.
+
+## Build e utilizzo
+
+Servono gli stessi strumenti della build principale, il GGUF e i file ufficiali del tokenizer. Su CPU senza AVX2, FMA e F16C il programma si ferma con un messaggio.
+
+~~~sh
+make lfm3 LFM3_MODEL=LFM3-1.7B-Q4_K_M.gguf LFM3_TOKENIZER=/opt/lfm3-ref/tokenizer.json
+./build/lfm3/lfm3-next LFM3-1.7B-Q4_K_M.gguf --text 128 "Scrivi due frasi su Torino."
+./build/lfm3/lfm3-next LFM3-1.7B-Q4_K_M.gguf --chat 256
+~~~
+
+Le opzioni sono quelle di `lfm-next`: `--generate`, `--text`, `--chat`, `--encode`, `--decode`, `LFM_CONTEXT` e `LFM_THREADS`. Gli ID vanno da 0 a 127.999. `build/lfm3/tokenizer.bin`, di 12.519.600 byte, deve restare accanto all'eseguibile. Il prompt segue il template ufficiale con `enable_thinking=False`, che termina con un blocco di ragionamento vuoto `<think></think>`; anche i turni precedenti della chat lo conservano, come nel template.
+
+Il runtime usa per ora un solo thread per il calcolo ed elabora il prompt un token alla volta. Su Intel Core i5-10500H in WSL2, con un thread, genera circa 9,9 token/s e impiega circa 160 ms per token di prompt. Thread, prefill a blocchi e kernel autonomo sono i passi successivi.
+
+## Implementazione
+
+- `layout.py` legge il GGUF in fase di build, verifica metadati, forme e tipi di tutti i 287 tensori e genera offset, tipi e la sequenza degli strati presa dal checkpoint. L'eseguibile controlla all'avvio un hash FNV-1a dell'intestazione GGUF, 8.247.328 byte.
+- Ogni ingresso di matrice viene quantizzato una volta in Q8_K: blocchi da 256 valori con scala 127 / max |x| e arrotondamento al pari. I prodotti con le righe Q4_K e Q6_K sono interi, con `vpmaddubsw` e `vpmaddwd`, seguiti da una FMA per blocco, come nei kernel AVX2 di pithos e ggml. L'embedding condiviso Q6_K fornisce sia la riga di ingresso, dequantizzata nell'ordine di ggml, sia i 128.000 logit.
+- RMSNorm usa pesi F32, la convoluzione conserva sei campioni di storia per canale, e la sandwich norm normalizza l'uscita di ogni blocco prima del residuo.
+- L'attenzione calcola norma e RoPE per testa, con le frequenze FP32 generate da `modeling_lfm3.py` in `frequencies.inc`; negli strati ad attenzione piena ruotano le prime 32 coppie. Ogni testa legge la testa KV h / 4, gli strati a finestra le ultime 256 posizioni, e l'uscita viene moltiplicata per il gate sigmoid della testa. La cache KV FP32 occupa 44 KiB per posizione.
+- `build_tokenizer.py` accetta `--vocab` e `--hash-bits` e, per i tokenizer con `ignore_merges`, aggiunge una tabella da sequenza di byte a ID; `tokenizer.asm` cerca prima il pezzo intero. Con i valori predefiniti le tabelle di LFM2.5 restano identiche byte per byte, e anche codice e dati caricati degli eseguibili LFM2.5 e del kernel coincidono con la versione precedente.
+
+## Verifica
+
+~~~sh
+make verify-lfm3-tokenizer LFM3_TOKENIZER=/opt/lfm3-ref/tokenizer.json
+make verify-lfm3 LFM3_MODEL=LFM3-1.7B-Q4_K_M.gguf LFM3_TOKENIZER=/opt/lfm3-ref/tokenizer.json LFM3_REF=/opt/lfm3-ref
+~~~
+
+Il tokenizer coincide con quello ufficiale su 62 testi, fra cui italiano, cinese, giapponese, coreano, arabo, hindi, thai, emoji, codice e token speciali, e nella decodifica di tutti i 128.000 ID in gruppi da 2.000.
+
+Per il modello un confronto bit per bit non e possibile. L'arrotondamento Q8_K e discontinuo: un valore al confine fra due livelli si sposta di un passo intero per una differenza di un ulp a monte, e questi casi si amplificano nei 24 strati, fino a circa un logit sui logit finali. Riguarda qualunque motore con attivazioni Q8_K, compresi ggml e pithos. `verify.py` controlla quindi tre aspetti.
+
+- Replay dei blocchi: la build diagnostica `lfm3-layers` scrive l'embedding e l'uscita normalizzata di ogni blocco per ogni token. Ogni blocco del riferimento, con gli stessi ingressi Q8_K, viene eseguito sugli stati del runtime per tutti i token, con le maschere causali e a finestra e le RoPE del forward ufficiale, e deve riprodurre l'uscita del runtime. Un arrotondamento al confine resta locale, a un token o ai token che leggono la key e il valore cambiati; un difetto colpirebbe la maggior parte dei token. La mediana di ogni blocco deve restare entro 1e-5 relativo, e la quota di coppie (token, blocco) oltre questa soglia viene confrontata con quella del riferimento contro se stesso, quando i suoi ingressi si spostano di un ulp.
+- Riferimento FP32: l'argmax dei logit finali deve coincidere.
+- Generazione: dopo un prompt di 463 token, ogni token greedy deve essere l'argmax del riferimento FP32, salvo quasi pareggi entro 0,25 logit.
+
+Risultati del 26 novembre 2026:
+
+| Controllo | Risultato |
+| --- | --- |
+| Replay, 20 token x 48 blocchi | mediana peggiore 1,2e-6; oltre 1e-5 il 3,23% delle coppie, contro il 3,85% del riferimento con se stesso |
+| Replay, 463 token x 48 blocchi | mediana peggiore 1,6e-6; oltre 1e-5 il 4,72%, contro l'8,75% |
+| Controllo negativo: finestra di 255 posizioni | mediana 9,3e-5 nello strato 12 a finestra: respinto |
+| Argmax FP32, prompt da 1, 20, 463 e 721 token | 4 su 4; differenza massima sui logit fra 0,20 e 1,48 |
+| Generazione greedy, 96 token | 95 argmax del riferimento; l'unico scostamento e un quasi pareggio di 0,018 logit |
+
+Con un solo token, ogni blocco coincide con il riferimento entro 1e-7-1e-6 relativo, salvo due MLP con un arrotondamento al confine a 3e-5. La risposta a `What is the capital of France?` coincide token per token con il riferimento e con pithos.
+
+Con il template ufficiale il modello Q4_K_M a volte chiude un ragionamento inesistente e ripete la risposta, ad esempio `Il colore azzurro.</think>Il colore azzurro.`; tutti i 14 token sono l'argmax del riferimento FP32, quindi il comportamento appartiene al modello. In una risposta della chat e comparso un carattere di sostituzione U+FFFD al posto di una lettera accentata; la decodifica coincide con quella ufficiale nei test, ma questo caso non e ancora stato isolato.
 
 ## Riferimento FP32
 
@@ -17,7 +68,7 @@ python lfm3/reference.py MODEL.gguf /opt/lfm3-ref teacher P ID ...
 
 Servono PyTorch, Transformers 5, `gguf` e `accelerate`. Ogni passaggio dequantizza l'intero checkpoint, circa 15-20 secondi su questa macchina, quindi la generazione token per token e lenta. `teacher` verifica invece l'output di un altro motore con un solo passaggio: i primi P ID sono il prompt, gli altri la continuazione greedy, e ogni token della continuazione deve essere l'argmax del riferimento. Per gli scostamenti stampa la distanza in logit dal massimo.
 
-## Verifiche della fase 1
+## Verifiche del riferimento
 
 - Il GGUF corrisponde a `config.json` e tutti i tensori si mappano sull'architettura ufficiale.
 - Il tokenizer ufficiale e quello di pithos producono gli stessi 20 ID per il prompt di prova.

@@ -1,4 +1,7 @@
 ; Linux entry point and platform services.
+%ifndef TOKEN_LIMIT
+%define TOKEN_LIMIT 65535          ; largest accepted token ID
+%endif
 section .text
 global _start
 _start:
@@ -126,7 +129,7 @@ _start:
     mov r13d,1
 .decode_validate:
     mov rsi,[rbx+r13*8]
-    mov ecx,65535
+    mov ecx,TOKEN_LIMIT
     call parse_uint
     mov [prompt_ids+r13*4-4],eax
     inc r13d
@@ -152,7 +155,7 @@ _start:
     xor r13d,r13d
 .parse_prompt:
     mov rsi,[rbx+r13*8]
-    mov ecx,65535
+    mov ecx,TOKEN_LIMIT
     call parse_uint
     mov [prompt_ids+r13*4],eax
     inc r13d

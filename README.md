@@ -57,6 +57,10 @@ Produce gli ID `1098 5706 803 4481 856 5242 523 7`, uno per riga. La chiamata eq
 
 Le modalita diagnostiche `--encode "testo"` e `--decode ID ...` espongono il tokenizer. Encode restituisce gli ID senza BOS implicito e decode omette i token speciali. Entrambe rispettano il numero di token consentito dal contesto configurato e usano le sole tabelle, quindi il percorso del checkpoint puo essere sostituito da `_`.
 
+## LFM3-1.7B
+
+Un secondo eseguibile Linux, `build/lfm3/lfm3-next`, esegue LiquidAI LFM3-1.7B dal GGUF Q4_K_M con le stesse opzioni, condividendo piattaforma, thread, tokenizer e chat. Usa attivazioni Q8_K e prodotti interi con le righe Q4_K e Q6_K, e per ora un solo thread di calcolo. Build, verifica e differenze rispetto a LFM2.5 sono descritte in [lfm3/README.md](lfm3/README.md).
+
 ## Avvio come kernel in QEMU
 
 Il kernel esegue inferenza e chat senza Linux nel sistema ospite. Multiboot 1 supporta l'avvio diretto di QEMU; Multiboot 2 supporta GRUB in modalita BIOS e UEFI. Il codice configura GDT, paging, long mode, stato SSE/AVX e gestori di eccezione. La cache viene allocata dalla mappa RAM del bootloader; pesi e tokenizer rimangono in memoria.

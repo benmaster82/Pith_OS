@@ -53,13 +53,26 @@ class Checkpoint:
         return torch.from_numpy(np.array(dequantize(data, tensor.tensor_type), dtype=np.float32))
 
 
+def q8k(x):
+    """Round-trip through ggml's Q8_K: per 256 values, scale 127 / max |x|, round half to even."""
+    blocks = x.reshape(*x.shape[:-1], -1, 256)
+    peak = blocks.abs().amax(dim=-1, keepdim=True)
+    scale = torch.where(peak > 0, torch.tensor(127.0) / peak, torch.zeros_like(peak))
+    step = torch.where(peak > 0, 1 / scale, torch.zeros_like(peak))
+    return (torch.round(blocks * scale) * step).reshape(x.shape)
+
+
 class GGUFLinear(torch.nn.Module):
+    quantize_inputs = False     # reproduce the runtime's Q8_K activations
+
     def __init__(self, checkpoint, name, chunk=None):
         super().__init__()
         self.checkpoint, self.name, self.chunk = checkpoint, name, chunk
         self.out_features, self.in_features = checkpoint.shape(name)
 
     def forward(self, x):
+        if self.quantize_inputs:
+            x = q8k(x)
         if self.chunk is None:
             return F.linear(x, self.checkpoint.rows(self.name))
         parts = [F.linear(x, self.checkpoint.rows(self.name, slice(i, i + self.chunk)))
@@ -197,7 +210,9 @@ def main():
     parser.add_argument("refdir")
     parser.add_argument("action", choices=("check", "logits", "generate", "chat", "teacher"))
     parser.add_argument("rest", nargs="*")
+    parser.add_argument("--q8k", action="store_true", help="quantize matrix inputs to Q8_K like the runtime")
     args = parser.parse_args()
+    GGUFLinear.quantize_inputs = args.q8k
     model, config = load(args.gguf, args.refdir)
     if args.action == "teacher":
         rows = teacher(model, [int(i) for i in args.rest[1:]], int(args.rest[0]))

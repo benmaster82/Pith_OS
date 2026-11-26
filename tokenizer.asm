@@ -1,4 +1,7 @@
 ; Native byte-level BPE, Unicode pre-tokenization and streaming UTF-8 decoding.
+%ifndef DECODE_BYTES
+%define DECODE_BYTES 128            ; pending UTF-8 bytes across tokens
+%endif
 
 section .text
 ; The platform supplies tokenizer_base; verify the complete compiled tables.
@@ -430,6 +433,43 @@ encode_piece:
     push r15
     mov ebp,ecx
     mov r15,[tokenizer_base]
+%ifdef TOK_IGNORE_MERGES
+    ; A piece found whole in the vocabulary is one token, without merges.
+    mov eax,2166136261
+    xor ecx,ecx
+.hash:
+    movzx edx,byte [rsi+rcx]
+    xor eax,edx
+    imul eax,16777619
+    inc ecx
+    cmp ecx,ebp
+    jb .hash
+.probe:
+    and eax,TOK_WORD_MASK
+    mov r12d,[r15+TOK_WORDS+rax*4]
+    test r12d,r12d
+    jz .merge
+    dec r12d
+    cmp [r15+TOK_RECORDS+r12*8+4],ebp
+    jne .collision
+    mov r13d,[r15+TOK_RECORDS+r12*8]
+    lea r13,[r15+TOK_BYTES+r13]
+    xor ecx,ecx
+.compare:
+    mov dl,[rsi+rcx]
+    cmp dl,[r13+rcx]
+    jne .collision
+    inc ecx
+    cmp ecx,ebp
+    jb .compare
+    mov eax,r12d
+    call append_token
+    jmp .return
+.collision:
+    inc eax
+    jmp .probe
+.merge:
+%endif
     xor ecx,ecx
 .initialize:
     movzx eax,byte [rsi+rcx]
@@ -490,6 +530,7 @@ encode_piece:
     mov r12d,[bpe_next+r12*4]
     cmp r12d,-1
     jne .output
+.return:
     pop r15
     pop r14
     pop r13
@@ -534,7 +575,7 @@ decode_token:
     mov edi,[decode_length]
     lea rdi,[decode_buffer+rdi]
     add [decode_length],ecx
-    cmp dword [decode_length],128
+    cmp dword [decode_length],DECODE_BYTES
     ja tokenizer_input_fail
     rep movsb
     call decode_pending
@@ -629,7 +670,7 @@ bpe_next: resd TEXT_BYTES
 bpe_prev: resd TEXT_BYTES
 bpe_rank: resd TEXT_BYTES
 bpe_merged: resd TEXT_BYTES
-decode_buffer: resb 128
+decode_buffer: resb DECODE_BYTES
 decode_length: resd 1
 decode_final: resb 1
 
