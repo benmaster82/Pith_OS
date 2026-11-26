@@ -223,19 +223,7 @@ parse_uint:
     NORMALIZE %1
     PROJECT normalized,%2,gate,1024,4608
     PROJECT normalized,%3,up,1024,4608
-    xor ecx,ecx
-%%activate:
-    movss xmm1,[gate+rcx*4]
-    xorps xmm0,xmm0
-    subss xmm0,xmm1
-    call exp_scalar
-    addss xmm0,[one]
-    divss xmm1,xmm0
-    mulss xmm1,[up+rcx*4]
-    movss [gate+rcx*4],xmm1
-    inc ecx
-    cmp ecx,4608
-    jb %%activate
+    call silu_gate
     PROJECT gate,%4,update,4608,1024
     call residual
 %endmacro
@@ -271,6 +259,24 @@ inv8: dd 0.125
 one: dd 1.0
 minus80: dd -80.0
 plus80: dd 80.0
+align 32
+%macro LANES 2
+%1: times 8 dd %2
+%endmacro
+LANES exp_min8,-80.0
+LANES exp_max8,80.0
+LANES log2e8,1.44269504088896341
+LANES ln2_hi8,0.693359375
+LANES ln2_lo8,-2.12194440e-4
+LANES exp_p0,1.9875691500e-4
+LANES exp_p1,1.3981999507e-3
+LANES exp_p2,8.3334519073e-3
+LANES exp_p3,4.1665795894e-2
+LANES exp_p4,1.6666665459e-1
+LANES exp_p5,5.0000001201e-1
+LANES one8,1.0
+LANES exp_bias8,127
+lane_index8: dd 0,1,2,3,4,5,6,7
 freq:
 %include "frequencies.inc"
 chat_option: db "--chat",0
@@ -293,6 +299,7 @@ output_error: db "Failed to write generated output",10
 output_error_len equ $-output_error
 section .bss
 text_mode: resb 1
+vector_math: resb 1
 prompt_ids: resd MAX_CONTEXT
 next_token: resd 1
 generated_tokens: resd 1

@@ -87,6 +87,8 @@ attention:
     jbe .score
     xor ecx,ecx
     xorps xmm7,xmm7
+    cmp byte [vector_math],0
+    jne .vector_softmax
 .softmax:
     movss xmm0,[scores+rcx*4]
     subss xmm0,xmm6
@@ -96,6 +98,7 @@ attention:
     inc ecx
     cmp ecx,r14d
     jbe .softmax
+.normalize:
     mov eax,r8d
     shr eax,1
     shl eax,8
@@ -126,3 +129,32 @@ attention:
     cmp r8d,16
     jb .head
     ret
+
+; Eight scores per step from position zero through r14d. The mask covers the
+; final partial vector, so lanes past the position are neither stored nor summed.
+.vector_softmax:
+    vbroadcastss ymm4,xmm6
+    vxorps ymm5,ymm5,ymm5
+    lea eax,[r14+1]
+.vector_exp:
+    mov edx,eax
+    sub edx,ecx
+    jbe .vector_sum
+    vmovd xmm6,edx
+    vpbroadcastd ymm6,xmm6
+    vpcmpgtd ymm6,ymm6,[lane_index8]
+    vmaskmovps ymm0,ymm6,[scores+rcx*4]
+    vsubps ymm0,ymm0,ymm4
+    call exp_avx2
+    vandps ymm0,ymm0,ymm6
+    vmaskmovps [scores+rcx*4],ymm6,ymm0
+    vaddps ymm5,ymm5,ymm0
+    add ecx,8
+    jmp .vector_exp
+.vector_sum:
+    vextractf128 xmm1,ymm5,1
+    vaddps xmm5,xmm5,xmm1
+    vhaddps xmm5,xmm5,xmm5
+    vhaddps xmm7,xmm5,xmm5
+    vzeroupper
+    jmp .normalize
