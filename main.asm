@@ -5,6 +5,9 @@ default abs
 %include "tokenizer.inc"
 %define TEXT_BYTES 8192
 %define MAX_CONTEXT 32768
+%ifndef PREFILL_BLOCK
+%define PREFILL_BLOCK 15            ; prompt tokens per weight pass
+%endif
 section .text
 %ifdef BARE_METAL
 %include "os/platform.asm"
@@ -34,6 +37,23 @@ generate_prompt:
     mov dword [decode_length],0
     mov byte [decode_final],0
     xor r13d,r13d
+    cmp byte [vector_math],0
+    je .prefill
+.block:
+    mov eax,ebp
+    sub eax,r13d
+    mov ecx,PREFILL_BLOCK
+    cmp eax,ecx
+    cmova eax,ecx
+    mov [block_count],eax
+    add eax,r14d
+    cmp eax,[context_limit]
+    ja fail
+    call forward_block
+    add r13d,[block_count]
+    cmp r13,rbp
+    jb .block
+    jmp .logits
 .prefill:
     mov eax,[prompt_ids+r13*4]
     call consume_token
@@ -223,6 +243,9 @@ parse_uint:
     NORMALIZE %1
     PROJECT normalized,%2,gate,1024,4608
     PROJECT normalized,%3,up,1024,4608
+    mov edi,gate
+    mov esi,up
+    mov edx,4608
     call silu_gate
     PROJECT gate,%4,update,4608,1024
     call residual
@@ -241,6 +264,181 @@ residual:
     movss [hidden+rcx*4],xmm0
     inc ecx
     cmp ecx,1024
+    jb .loop
+    ret
+
+; Prefill blocks: the same layers over [block_count] tokens. Matrices read
+; each weight row once per block; normalization, convolution state, RoPE and
+; attention advance token by token in order, so every value matches forward.
+; ebx indexes the token inside a block.
+%macro BPROJECT 6
+    mov edi,%1
+    lea rsi,[r15+%2]
+    mov edx,%3
+    mov ecx,%4
+    mov r8d,%5
+    mov r9d,%6
+    mov r10d,[block_count]
+    call matvec_batch
+%endmacro
+%macro BNORMALIZE 1
+    xor ebx,ebx
+%%token:
+    imul edi,ebx,4096
+    add edi,block_hidden
+    lea rsi,[r15+%1]
+    imul edx,ebx,4096
+    add edx,block_normalized
+    mov ecx,1024
+    call norm
+    inc ebx
+    cmp ebx,[block_count]
+    jb %%token
+%endmacro
+%macro BCONV_LAYER 4
+    BNORMALIZE %1
+    BPROJECT block_normalized,%2,block_projection,1024,3072,4096
+    xor ebx,ebx
+%%convolve:
+    imul edi,ebx,3072*4
+    add edi,block_projection
+    lea rsi,[r15+%3]
+    mov edx,conv_cache+conv_index*8192
+    call conv_step
+    inc ebx
+    cmp ebx,[block_count]
+    jb %%convolve
+    BPROJECT block_projection,%4,block_update,1024,1024,3072*4
+    %assign conv_index conv_index+1
+%endmacro
+%macro BATT_LAYER 7
+    BNORMALIZE %1
+    BPROJECT block_normalized,%2,block_query,1024,1024,4096
+    BPROJECT block_normalized,%3,block_key,1024,512,4096
+    BPROJECT block_normalized,%4,block_value,1024,512,4096
+    mov r12,[kv_stride]
+    imul r12,att_index
+    add r12,[kv_base]
+    xor ebx,ebx
+%%rotate:
+    mov r14d,[block_base]
+    add r14d,ebx
+    call prepare_rope
+    imul edi,ebx,4096
+    add edi,block_query
+    mov esi,16
+    lea rdx,[r15+%5]
+    call head_norm_rope
+    imul edi,ebx,2048
+    add edi,block_key
+    mov esi,8
+    lea rdx,[r15+%6]
+    call head_norm_rope
+    mov edi,r14d
+    shl edi,12
+    add rdi,r12
+    imul esi,ebx,2048
+    add esi,block_key
+    mov ecx,512
+    rep movsd
+    imul esi,ebx,2048
+    add esi,block_value
+    mov ecx,512                    ; value follows key in each cache row
+    rep movsd
+    inc ebx
+    cmp ebx,[block_count]
+    jb %%rotate
+    ; Every key and value of the block is cached; each token reads only
+    ; positions up to its own.
+    xor ebx,ebx
+%%attend:
+    mov r14d,[block_base]
+    add r14d,ebx
+    imul esi,ebx,4096
+    add esi,block_query
+    mov edi,query
+    mov ecx,1024
+    rep movsd
+    call attention
+    mov esi,mixed
+    imul edi,ebx,4096
+    add edi,block_mixed
+    mov ecx,1024
+    rep movsd
+    inc ebx
+    cmp ebx,[block_count]
+    jb %%attend
+    mov r14d,[block_base]
+    BPROJECT block_mixed,%7,block_update,1024,1024,4096
+    %assign att_index att_index+1
+%endmacro
+%macro BMLP 4
+    call block_residual
+    BNORMALIZE %1
+    BPROJECT block_normalized,%2,block_gate,1024,4608,4096
+    BPROJECT block_normalized,%3,block_up,1024,4608,4096
+    mov edi,block_gate
+    mov esi,block_up
+    imul edx,[block_count],4608
+    call silu_gate
+    BPROJECT block_gate,%4,block_update,4608,1024,4608*4
+    call block_residual
+%endmacro
+
+; Consume prompt_ids[r13..r13+block_count) at positions r14 onward. The last
+; hidden state is copied to hidden for the logits. Advances r14.
+forward_block:
+    push rbx
+    mov [block_base],r14d
+    xor ebx,ebx
+.embed:
+    lea eax,[r13+rbx]
+    mov eax,[prompt_ids+rax*4]
+    shl eax,11
+    lea rsi,[r15+rax+EMBED]
+    imul edi,ebx,4096
+    add edi,block_hidden
+    xor ecx,ecx
+.lane:
+    movzx eax,word [rsi+rcx*2]
+    shl eax,16
+    mov [rdi+rcx*4],eax
+    inc ecx
+    cmp ecx,1024
+    jb .lane
+    inc ebx
+    cmp ebx,[block_count]
+    jb .embed
+    %assign conv_index 0
+    %assign att_index 0
+    %define CONV_LAYER BCONV_LAYER
+    %define ATT_LAYER BATT_LAYER
+    %define MLP BMLP
+    %include "layers.inc"
+    %undef CONV_LAYER
+    %undef ATT_LAYER
+    %undef MLP
+    mov esi,[block_count]
+    dec esi
+    shl esi,12
+    add esi,block_hidden
+    mov edi,hidden
+    mov ecx,1024
+    rep movsd
+    mov r14d,[block_base]
+    add r14d,[block_count]
+    pop rbx
+    ret
+
+block_residual:
+    imul edx,[block_count],1024
+    xor ecx,ecx
+.loop:
+    movss xmm0,[block_update+rcx*4]
+    addss xmm0,[block_hidden+rcx*4]
+    movss [block_hidden+rcx*4],xmm0
+    inc ecx
+    cmp ecx,edx
     jb .loop
     ret
 %include "kernels.asm"
@@ -317,6 +515,19 @@ value: resd 512
 mixed: resd 1024
 scores: resd MAX_CONTEXT*MAX_THREADS  ; one row per attention partition
 logits: resd 65536
+block_count: resd 1
+block_base: resd 1
+alignb 32
+block_hidden: resd PREFILL_BLOCK*1024
+block_normalized: resd PREFILL_BLOCK*1024
+block_update: resd PREFILL_BLOCK*1024
+block_projection: resd PREFILL_BLOCK*3072
+block_gate: resd PREFILL_BLOCK*4608
+block_up: resd PREFILL_BLOCK*4608
+block_query: resd PREFILL_BLOCK*1024
+block_key: resd PREFILL_BLOCK*512
+block_value: resd PREFILL_BLOCK*512
+block_mixed: resd PREFILL_BLOCK*1024
 kv_base: resq 1
 kv_stride: resq 1
 model_base: resq 1

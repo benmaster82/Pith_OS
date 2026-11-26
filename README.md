@@ -185,7 +185,7 @@ L'ambiente di verifica su questa macchina risiede in Ubuntu WSL2, in `/opt/lfm-v
 wsl -d Ubuntu -- make verify MODEL=weights/model.safetensors PYTHON=/opt/lfm-venv/bin/python
 ~~~
 
-Il prossimo obiettivo di prestazioni e il prefill a blocchi, mantenendo i pesi BF16. Il prefill attuale elabora il prompt token per token.
+Con AVX2/FMA il prompt viene elaborato a blocchi di 15 token, mantenendo i pesi BF16. Il percorso scalare elabora ancora il prompt token per token.
 
 Verifica BF16 completata il 26 novembre 2026 su Ubuntu WSL2 con NASM 3.01, PyTorch 2.15.0+cpu e Transformers 5.24.1. Le sei predizioni coincidono con il riferimento, fino a 512 token. Lo scarto massimo assoluto sui logit e 0,00018620. La domanda `What is the capital of France?` produce come primo token `The` (ID 1098). L'eseguibile ELF e statico; pesi e tabelle del tokenizer sono in file separati.
 
@@ -215,6 +215,17 @@ Con lo stesso percorso AVX2/FMA, l'esponenziale della SiLU negli MLP e della sof
 
 Anche l'attenzione ha un percorso AVX2/FMA. Le 64 componenti della query restano nei registri durante i prodotti con le key, e una sola passata sulle posizioni accumula tutte le componenti dei valori. Le 16 teste sono distribuite fra i worker, e ogni partizione usa una propria riga di punteggi. Ogni testa e calcolata dallo stesso codice qualunque sia il thread, quindi i logit restano identici bit per bit fra 1 e 16 thread o core. Linux e kernel condividono il meccanismo dei job: i worker eseguono la funzione indicata da `job_entry`, che puo essere il matvec o l'attenzione. Il percorso scalare dell'attenzione resta sul thread principale. Sulla stessa macchina, con 1.900 posizioni in cache, la generazione e salita da 15,8 a 21,4 token/s con un thread e da circa 23 a 28 token/s con quattro.
 
+Il prompt viene elaborato a blocchi di 15 token, impostabili a compile time con `-DPREFILL_BLOCK=N`. Nelle matrici ogni riga di pesi viene letta una sola volta per blocco, e ogni vettore BF16 convertito serve fino a tre token. Ogni coppia (riga, token) usa gli stessi quattro accumulatori e lo stesso albero di riduzione del matvec a un token, quindi il prefill a blocchi e identico bit per bit all'elaborazione token per token. Normalizzazioni, stato delle convoluzioni, RoPE e attenzione avanzano un token alla volta nell'ordine originale. Le key e i valori del blocco vengono scritti in cache prima dell'attenzione, e ogni token legge solo le posizioni fino alla propria. Logit, generazione e trascrizioni della chat coincidono byte per byte con la versione precedente, per prompt da 1 a 511 token e con 1, 3 e 4 thread. Sulla stessa macchina, misurando l'intero processo fino al primo token, i tempi sono questi:
+
+| Prompt | Thread | Token per token | A blocchi | Accelerazione |
+| --- | --- | --- | --- | --- |
+| 25 token | 1 | 896 ms | 371 ms | 2,4x |
+| 512 token | 1 | 18,66 s | 7,53 s | 2,5x |
+| 25 token | 4 | 631 ms | 179 ms | 3,5x |
+| 512 token | 4 | 16,55 s | 3,51 s | 4,7x |
+
+Il prefill a blocchi e limitato dal calcolo FMA e non piu dalla banda di memoria, quindi scala con i thread; blocchi piu grandi di 15 token non hanno migliorato i tempi.
+
 Le scelte architetturali seguono il rapporto tecnico LFM2 e la configurazione del checkpoint. Le matrici dense dei blocchi convoluzionali e degli MLP restano il principale obiettivo del kernel vettoriale. [Rapporto tecnico Liquid AI](https://arxiv.org/html/2511.23404v1#S2)
 
 Per confrontare sullo stesso checkpoint il percorso scalare e quello selezionato automaticamente, eseguire
@@ -239,7 +250,7 @@ make build/lfm-scalar build/lfm-next MODEL=/opt/lfm-model/model.safetensors
 python3 benchmark.py /opt/lfm-model/model.safetensors build/lfm-scalar build/lfm-next --repeats 5 --output build/benchmark.json
 ~~~
 
-La latenza include avvio, mmap, elaborazione del prompt e predizione finale. Il prototipo elabora ancora il prompt token per token. I risultati di altri runtime richiedono un confronto con gli stessi pesi, precisione e hardware.
+La latenza include avvio, mmap, elaborazione del prompt e predizione finale. Le misure di questa sezione precedono il prefill a blocchi descritto in Implementazione. I risultati di altri runtime richiedono un confronto con gli stessi pesi, precisione e hardware.
 
 Il confronto successivo del parallelismo, sulla stessa CPU e con cinque ripetizioni dopo il riscaldamento, ha prodotto queste mediane per il prompt da 16 token.
 

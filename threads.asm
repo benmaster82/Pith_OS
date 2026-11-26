@@ -231,6 +231,8 @@ job_rows: resd 1
 job_entry: resq 1
 job_kv: resq 1
 job_position: resd 1
+job_in_stride: resq 1
+job_tokens: resd 1
 alignb 64
 worker_stacks: resb (MAX_THREADS-1)*WORKER_STACK
 
