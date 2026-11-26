@@ -1,0 +1,7 @@
+/build/
+/weights/
+__pycache__/
+*.safetensors
+*.bundle
+*.iso
+/ssh.txt
