@@ -59,7 +59,7 @@ Le modalita diagnostiche `--encode "testo"` e `--decode ID ...` espongono il tok
 
 ## LFM3-1.7B
 
-Un secondo eseguibile Linux, `build/lfm3/lfm3-next`, esegue LiquidAI LFM3-1.7B dal GGUF Q4_K_M con le stesse opzioni, condividendo piattaforma, thread, tokenizer e chat. Usa attivazioni Q8_K e prodotti interi con le righe Q4_K e Q6_K, e per ora un solo thread di calcolo. Build, verifica e differenze rispetto a LFM2.5 sono descritte in [lfm3/README.md](lfm3/README.md).
+Un secondo eseguibile Linux, `build/lfm3/lfm3-next`, esegue LiquidAI LFM3-1.7B dal GGUF Q4_K_M con le stesse opzioni, condividendo piattaforma, thread, tokenizer e chat. Usa attivazioni Q8_K e prodotti interi con le righe Q4_K e Q6_K, worker paralleli e prefill a blocchi. Build, verifica e differenze rispetto a LFM2.5 sono descritte in [lfm3/README.md](lfm3/README.md).
 
 ## Avvio come kernel in QEMU
 

@@ -2,9 +2,6 @@
 ; the seven-tap short convolution and windowed, gated attention. AVX2, FMA
 ; and F16C. The quantized dot products follow ggml's formats: every matrix
 ; input is quantized once per row into 256-value Q8_K blocks.
-%define Q8K_BYTES 292                ; f32 scale, 256 int8, 16 int16 sums
-%define Q4K_BYTES 144
-%define Q6K_BYTES 210
 
 section .text
 ; Select once at startup. XGETBV is safe only after OSXSAVE is checked.
@@ -218,6 +215,53 @@ matvec_q4k:
     pop rbx
     ret
 
+; rdi = Q8_K input, rsi = rows, rdx = output, ecx = width, r8d = rows,
+; r9 = kernel, r10d = bytes per 256-value weight block. Rows are partitioned
+; across workers; each row's arithmetic does not depend on the partition.
+qmatvec:
+    cmp dword [thread_count],1
+    je .direct
+    mov [job_input],rdi
+    mov [job_weights],rsi
+    mov [job_output],rdx
+    mov [job_width],ecx
+    mov [job_rows],r8d
+    mov [job_kernel],r9
+    mov [job_block_bytes],r10d
+    mov qword [job_entry],run_qjob
+    jmp dispatch_job
+.direct:
+    jmp r9
+
+; eax = partition index. Last partition owns the remainder.
+run_qjob:
+    mov r9d,eax
+    mov eax,[job_rows]
+    xor edx,edx
+    div dword [thread_count]
+    mov r8d,eax
+    imul eax,r9d
+    inc r9d
+    cmp r9d,[thread_count]
+    jne .address
+    add r8d,edx
+.address:
+    test r8d,r8d
+    jz .empty
+    mov ecx,[job_width]
+    mov rdx,[job_output]
+    lea rdx,[rdx+rax*4]
+    mov r9d,ecx
+    shr r9d,8
+    imul r9d,[job_block_bytes]
+    imul rax,r9
+    mov rsi,[job_weights]
+    add rsi,rax
+    mov rdi,[job_input]
+    jmp [job_kernel]
+.empty:
+    ret
+
 ; Unpack one Q6_K block at rsi into ymm6-ymm13: 256 values 0..63 in order.
 ; ymm14 = 0x03 bytes, ymm15 = 0x0f bytes; ymm1-ymm5 are clobbered.
 %macro Q6_UNPACK 0
@@ -308,6 +352,292 @@ matvec_q6k:
     vzeroupper
     pop r13
     pop r12
+    pop rbx
+    ret
+
+; Prefill blocks. rdi = Q8_K inputs of consecutive tokens, rsi = rows, rdx =
+; outputs [tokens][rows], ecx = width, r8d = rows, r9 = batch kernel, r10d =
+; tokens, r11d = bytes per weight block. The kernels then take r9 = input
+; stride and r11 = output stride in bytes.
+qmatvec_batch:
+    mov [job_input],rdi
+    mov [job_weights],rsi
+    mov [job_output],rdx
+    mov [job_width],ecx
+    mov [job_rows],r8d
+    mov [job_tokens],r10d
+    mov [job_kernel],r9
+    mov [job_block_bytes],r11d
+    mov qword [job_entry],run_qbatch_job
+    cmp dword [thread_count],1
+    jne dispatch_job
+    xor eax,eax
+    jmp run_qbatch_job
+
+run_qbatch_job:
+    mov r9d,eax
+    mov eax,[job_rows]
+    xor edx,edx
+    div dword [thread_count]
+    mov r8d,eax
+    imul eax,r9d
+    inc r9d
+    cmp r9d,[thread_count]
+    jne .address
+    add r8d,edx
+.address:
+    test r8d,r8d
+    jz .empty
+    mov ecx,[job_width]
+    mov rdx,[job_output]
+    lea rdx,[rdx+rax*4]
+    mov r9d,ecx
+    shr r9d,8
+    imul r9d,[job_block_bytes]
+    imul rax,r9
+    mov rsi,[job_weights]
+    add rsi,rax
+    mov rdi,[job_input]
+    mov r9d,[job_width]
+    shr r9d,8
+    imul r9d,r9d,Q8K_BYTES        ; each token holds width / 256 Q8_K blocks
+    mov r10d,[job_tokens]
+    mov r11d,[job_rows]
+    shl r11,2
+    jmp [job_kernel]
+.empty:
+    ret
+
+; Stack frame of the batch kernels: per token a ymm and an xmm accumulator.
+%define BATCH_ACC 64
+%define BATCH_LOCALS PREFILL_BLOCK*BATCH_ACC+32
+
+; Each block's nibbles, scales and mins are unpacked once and reused by every
+; token. Per (row, token) the integer sums, the FMA per block and the final
+; reductions are those of matvec_q4k, so results are bit-identical.
+matvec_q4k_batch:
+    push rbx
+    push rbp
+    push r12
+    push r13
+    push r14
+    push r15
+    mov rbp,rsp
+    sub rsp,BATCH_LOCALS
+    and rsp,-32
+    shr ecx,8
+    mov [rsp+PREFILL_BLOCK*BATCH_ACC],ecx
+    mov r15,rdx
+.row:
+    xor eax,eax
+    vxorps ymm0,ymm0,ymm0
+.clear:
+    vmovaps [rsp+rax],ymm0
+    vmovaps [rsp+rax+32],xmm0
+    add eax,BATCH_ACC
+    cmp eax,PREFILL_BLOCK*BATCH_ACC
+    jb .clear
+    mov ebx,[rsp+PREFILL_BLOCK*BATCH_ACC]
+    xor r14d,r14d                ; block offset inside each token's input
+.block:
+    mov eax,[rsi+4]
+    mov ecx,[rsi+8]
+    mov edx,[rsi+12]
+    mov r12d,edx
+    shr r12d,4
+    and r12d,0x0f0f0f0f
+    mov r13d,ecx
+    shr r13d,6
+    and r13d,0x03030303
+    shl r13d,4
+    or r12d,r13d                ; mins 4-7
+    mov r13d,eax
+    shr r13d,6
+    and r13d,0x03030303
+    shl r13d,4
+    and edx,0x0f0f0f0f
+    or edx,r13d                 ; scales 4-7
+    and ecx,0x3f3f3f3f          ; mins 0-3
+    and eax,0x3f3f3f3f          ; scales 0-3
+    vmovd xmm2,eax
+    vpinsrd xmm2,xmm2,edx,1
+    vpinsrd xmm2,xmm2,ecx,2
+    vpinsrd xmm2,xmm2,r12d,3
+    vpmovzxbw ymm2,xmm2
+    vextracti128 xmm3,ymm2,1    ; mins
+    vinserti128 ymm2,ymm2,xmm2,1
+    vmovd xmm4,[rsi]
+    vcvtph2ps xmm4,xmm4         ; d, dmin
+%assign j 0
+%rep 4
+%assign r 8+2*j
+    vmovdqu ymm1,[rsi+16+j*32]
+    vpand ymm%[r],ymm1,[nibble_mask8]
+%assign r 9+2*j
+    vpsrlw ymm1,ymm1,4
+    vpand ymm%[r],ymm1,[nibble_mask8]
+%assign j j+1
+%endrep
+    lea r13,[rdi+r14]
+    mov rax,rsp
+    mov r12d,r10d
+.token:
+    vbroadcastss xmm0,[r13]
+    vmulps xmm0,xmm4,xmm0       ; d * dy, dmin * dy
+    vmovdqu ymm5,[r13+260]
+    vextracti128 xmm6,ymm5,1
+    vphaddw xmm5,xmm5,xmm6
+    vpmaddwd xmm5,xmm3,xmm5
+    vcvtdq2ps xmm5,xmm5
+    vmovshdup xmm6,xmm0
+    vbroadcastss xmm6,xmm6
+    vmovaps xmm7,[rax+32]
+    vfmadd231ps xmm7,xmm6,xmm5
+    vmovaps [rax+32],xmm7
+    vpxor ymm5,ymm5,ymm5
+%assign j 0
+%rep 4
+%assign r 8+2*j
+    vpshufb ymm6,ymm2,[q4k_scale_low+j*32]
+    vpmaddubsw ymm1,ymm%[r],[r13+4+j*64]
+    vpmaddwd ymm1,ymm6,ymm1
+%assign r 9+2*j
+    vpshufb ymm6,ymm2,[q4k_scale_high+j*32]
+    vpmaddubsw ymm7,ymm%[r],[r13+4+j*64+32]
+    vpmaddwd ymm7,ymm6,ymm7
+    vpaddd ymm5,ymm5,ymm1
+    vpaddd ymm5,ymm5,ymm7
+%assign j j+1
+%endrep
+    vcvtdq2ps ymm5,ymm5
+    vbroadcastss ymm6,xmm0
+    vmovaps ymm7,[rax]
+    vfmadd231ps ymm7,ymm6,ymm5
+    vmovaps [rax],ymm7
+    add rax,BATCH_ACC
+    add r13,r9
+    dec r12d
+    jnz .token
+    add rsi,Q4K_BYTES
+    add r14,Q8K_BYTES
+    dec ebx
+    jnz .block
+    mov rax,rsp
+    mov r13,r15
+    mov r12d,r10d
+.store:
+    vmovaps ymm0,[rax]
+    vmovaps xmm1,[rax+32]
+    HSUM ymm0,xmm0,xmm2
+    vmovhlps xmm2,xmm2,xmm1
+    vaddps xmm1,xmm1,xmm2
+    vmovshdup xmm2,xmm1
+    vaddss xmm1,xmm1,xmm2
+    vsubss xmm0,xmm0,xmm1
+    vmovss [r13],xmm0
+    add rax,BATCH_ACC
+    add r13,r11
+    dec r12d
+    jnz .store
+    add r15,4
+    dec r8d
+    jnz .row
+    vzeroupper
+    mov rsp,rbp
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop rbp
+    pop rbx
+    ret
+
+; Q6_K counterpart of matvec_q4k_batch, bit-identical to matvec_q6k.
+matvec_q6k_batch:
+    push rbx
+    push rbp
+    push r12
+    push r13
+    push r14
+    push r15
+    mov rbp,rsp
+    sub rsp,BATCH_LOCALS
+    and rsp,-32
+    shr ecx,8
+    mov [rsp+PREFILL_BLOCK*BATCH_ACC],ecx
+    mov r15,rdx
+.row:
+    xor eax,eax
+    vxorps ymm0,ymm0,ymm0
+.clear:
+    vmovaps [rsp+rax],ymm0
+    add eax,BATCH_ACC
+    cmp eax,PREFILL_BLOCK*BATCH_ACC
+    jb .clear
+    mov ebx,[rsp+PREFILL_BLOCK*BATCH_ACC]
+    xor r14d,r14d
+.block:
+    vmovdqu ymm14,[pair_mask8]
+    vmovdqu ymm15,[nibble_mask8]
+    Q6_UNPACK
+    movzx eax,word [rsi+208]
+    vmovd xmm15,eax
+    vcvtph2ps xmm15,xmm15       ; d
+    vmovdqu xmm2,[rsi+192]
+    vpmovsxbw ymm14,xmm2
+    lea r13,[rdi+r14]
+    mov rax,rsp
+    mov r12d,r10d
+.token:
+    vmulss xmm0,xmm15,[r13]     ; d * dy
+    vpmaddwd ymm3,ymm14,[r13+260]
+    vpslld ymm3,ymm3,5
+    vpxor ymm4,ymm4,ymm4
+    vpsubd ymm4,ymm4,ymm3
+%assign j 0
+%rep 8
+%assign r 6+j
+    vpshufb xmm5,xmm2,[q6k_scales+j*16]
+    vpmovsxbw ymm5,xmm5
+    vpmaddubsw ymm3,ymm%[r],[r13+4+j*32]
+    vpmaddwd ymm3,ymm5,ymm3
+    vpaddd ymm4,ymm4,ymm3
+%assign j j+1
+%endrep
+    vcvtdq2ps ymm4,ymm4
+    vbroadcastss ymm0,xmm0
+    vmovaps ymm1,[rax]
+    vfmadd231ps ymm1,ymm0,ymm4
+    vmovaps [rax],ymm1
+    add rax,BATCH_ACC
+    add r13,r9
+    dec r12d
+    jnz .token
+    add rsi,Q6K_BYTES
+    add r14,Q8K_BYTES
+    dec ebx
+    jnz .block
+    mov rax,rsp
+    mov r13,r15
+    mov r12d,r10d
+.store:
+    vmovaps ymm0,[rax]
+    HSUM ymm0,xmm0,xmm2
+    vmovss [r13],xmm0
+    add rax,BATCH_ACC
+    add r13,r11
+    dec r12d
+    jnz .store
+    add r15,4
+    dec r8d
+    jnz .row
+    vzeroupper
+    mov rsp,rbp
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop rbp
     pop rbx
     ret
 
@@ -510,10 +840,48 @@ sigmoid16:
     ret
 
 ; r12 = layer cache rows of 4096 bytes (keys of 4 heads, then values),
-; r14d = position, r10d = first visible position. Each of the 16 query heads
-; reads key/value head h / 4; its output is scaled by gate / sum(exp).
+; r14d = position, r10d = first visible position. Heads are independent, so
+; partitions compute whole heads with their own score rows and every head is
+; bit-identical at any thread count.
 attention:
-    xor r8d,r8d
+    mov [job_kv],r12
+    mov [job_position],r14d
+    mov [job_window],r10d
+    mov qword [job_entry],attention_job
+    cmp dword [thread_count],1
+    jne dispatch_job
+    xor eax,eax
+    jmp attention_job
+
+; eax = partition index; heads [index*16/threads, (index+1)*16/threads).
+attention_job:
+    push r12
+    push r13
+    push r14
+    mov r12,[job_kv]
+    mov r14d,[job_position]
+    mov r10d,[job_window]
+    mov r9d,eax
+    imul esi,eax,MAX_CONTEXT*4
+    add rsi,scores
+    shl eax,4
+    xor edx,edx
+    div dword [thread_count]
+    mov r8d,eax
+    lea eax,[r9+1]
+    shl eax,4
+    xor edx,edx
+    div dword [thread_count]
+    mov edi,eax
+    call attention_heads
+    pop r14
+    pop r13
+    pop r12
+    ret
+
+; Heads r8d up to edi, score row rsi. Each query head reads key/value head
+; h / 4; its output is scaled by gate / sum(exp). r13 is clobbered.
+attention_heads:
 .head:
     mov eax,r8d
     shr eax,2
@@ -543,7 +911,7 @@ attention:
     vaddps ymm0,ymm0,ymm1
     HSUM ymm0,xmm0,xmm1
     vmulss xmm0,xmm0,[attention_scale]
-    vmovss [scores+rdx*4],xmm0
+    vmovss [rsi+rdx*4],xmm0
     vmaxss xmm6,xmm6,xmm0
     add r9,4096
     inc edx
@@ -562,16 +930,16 @@ attention:
     vmovd xmm6,edx
     vpbroadcastd ymm6,xmm6
     vpcmpgtd ymm6,ymm6,[lane_index8]
-    vmaskmovps ymm0,ymm6,[scores+rcx*4]
+    vmaskmovps ymm0,ymm6,[rsi+rcx*4]
     vsubps ymm0,ymm0,ymm4
     call exp_avx2
     vandps ymm0,ymm0,ymm6
-    vmaskmovps [scores+rcx*4],ymm6,ymm0
+    vmaskmovps [rsi+rcx*4],ymm6,ymm0
     vaddps ymm5,ymm5,ymm0
     add ecx,8
     jmp .softmax
 .sum:
-    mov [visible],eax
+    mov r13d,eax
     HSUM ymm5,xmm5,xmm1
     vmovss xmm7,[headgate+r8*4]
     vdivss xmm7,xmm7,xmm5
@@ -595,7 +963,7 @@ attention:
 %endrep
     xor ecx,ecx
 .weighted%[half]:
-    vbroadcastss ymm0,[scores+rcx*4]
+    vbroadcastss ymm0,[rsi+rcx*4]
 %assign k 0
 %rep 8
 %assign r 8+k
@@ -604,7 +972,7 @@ attention:
 %endrep
     add r9,4096
     inc ecx
-    cmp ecx,[visible]
+    cmp ecx,r13d
     jb .weighted%[half]
 %assign k 0
 %rep 8
@@ -616,7 +984,7 @@ attention:
 %assign half half+1
 %endrep
     inc r8d
-    cmp r8d,16
+    cmp r8d,edi
     jb .head
     vzeroupper
     ret
@@ -656,6 +1024,9 @@ attention_scale: dd 0.08838834764831845    ; head_dim ** -0.5
 section .bss
 alignb 32
 q6k_values: resb 256
-visible: resd 1
+job_kernel: resq 1
+job_block_bytes: resd 1
+job_window: resd 1
+
 
 section .text

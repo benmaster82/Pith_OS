@@ -14,7 +14,18 @@ make lfm3 LFM3_MODEL=LFM3-1.7B-Q4_K_M.gguf LFM3_TOKENIZER=/opt/lfm3-ref/tokenize
 
 Le opzioni sono quelle di `lfm-next`: `--generate`, `--text`, `--chat`, `--encode`, `--decode`, `LFM_CONTEXT` e `LFM_THREADS`. Gli ID vanno da 0 a 127.999. `build/lfm3/tokenizer.bin`, di 12.519.600 byte, deve restare accanto all'eseguibile. Il prompt segue il template ufficiale con `enable_thinking=False`, che termina con un blocco di ragionamento vuoto `<think></think>`; anche i turni precedenti della chat lo conservano, come nel template.
 
-Il runtime usa per ora un solo thread per il calcolo ed elabora il prompt un token alla volta. Su Intel Core i5-10500H in WSL2, con un thread, genera circa 9,9 token/s e impiega circa 160 ms per token di prompt. Thread, prefill a blocchi e kernel autonomo sono i passi successivi.
+I prodotti matrice-vettore e l'attenzione sono distribuiti fra i worker, e il prompt viene elaborato a blocchi di 15 token. Logit, generazione e trascrizioni della chat sono identici bit per bit fra 1 e 16 thread e fra prefill a blocchi e prefill token per token.
+
+Misure del 27 novembre 2026 su Intel Core i5-10500H, WSL2 con quattro CPU visibili, prompt di 465 token e 64 token generati, mediane di tre ripetizioni. Il tempo del primo token include l'avvio del processo.
+
+| Thread | Primo token | Prompt | Generazione |
+| --- | --- | --- | --- |
+| 1, token per token | 38,04 s | 12 token/s | 9,91 token/s |
+| 1 | 19,67 s | 24 token/s | 9,79 token/s |
+| 2 | 11,82 s | 39 token/s | 16,37 token/s |
+| 4 | 7,95 s | 59 token/s | 17,77 token/s |
+
+Sulla stessa macchina pithos su Windows, con `-t 4`, ha elaborato lo stesso prompt a 55,7-61,9 token/s, avvio escluso, e generato a 19,0-21,4 token/s; con sei thread 67-68 e 22 token/s. La generazione e limitata dalla banda di memoria: ogni token legge circa 1 GB di pesi.
 
 ## Implementazione
 
@@ -22,6 +33,7 @@ Il runtime usa per ora un solo thread per il calcolo ed elabora il prompt un tok
 - Ogni ingresso di matrice viene quantizzato una volta in Q8_K: blocchi da 256 valori con scala 127 / max |x| e arrotondamento al pari. I prodotti con le righe Q4_K e Q6_K sono interi, con `vpmaddubsw` e `vpmaddwd`, seguiti da una FMA per blocco, come nei kernel AVX2 di pithos e ggml. L'embedding condiviso Q6_K fornisce sia la riga di ingresso, dequantizzata nell'ordine di ggml, sia i 128.000 logit.
 - RMSNorm usa pesi F32, la convoluzione conserva sei campioni di storia per canale, e la sandwich norm normalizza l'uscita di ogni blocco prima del residuo.
 - L'attenzione calcola norma e RoPE per testa, con le frequenze FP32 generate da `modeling_lfm3.py` in `frequencies.inc`; negli strati ad attenzione piena ruotano le prime 32 coppie. Ogni testa legge la testa KV h / 4, gli strati a finestra le ultime 256 posizioni, e l'uscita viene moltiplicata per il gate sigmoid della testa. La cache KV FP32 occupa 44 KiB per posizione.
+- I worker ricevono righe intere delle matrici, o teste intere dell'attenzione con una propria riga di punteggi, tramite il meccanismo `job_entry` condiviso con LFM2.5. Nel prefill a blocchi ogni blocco di pesi Q4_K o Q6_K viene spacchettato una volta e riusato per tutti i token; per ogni coppia (riga, token) somme intere, FMA per blocco e riduzioni finali sono quelle del kernel a un token. Norme, convoluzione, RoPE e attenzione avanzano un token alla volta, e le key e i valori del blocco vengono scritti in cache prima dell'attenzione. La build diagnostica `lfm3-layers` elabora il prompt token per token per conservare l'ordine dei dump.
 - `build_tokenizer.py` accetta `--vocab` e `--hash-bits` e, per i tokenizer con `ignore_merges`, aggiunge una tabella da sequenza di byte a ID; `tokenizer.asm` cerca prima il pezzo intero. Con i valori predefiniti le tabelle di LFM2.5 restano identiche byte per byte, e anche codice e dati caricati degli eseguibili LFM2.5 e del kernel coincidono con la versione precedente.
 
 ## Verifica

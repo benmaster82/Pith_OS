@@ -10,6 +10,12 @@ default abs
 %define DECODE_BYTES 512
 %define KV_LAYERS ATT_LAYERS
 %define CONV_STATE_BYTES CONV_LAYERS*6*8192
+%define Q8K_BYTES 292                ; f32 scale, 256 int8, 16 int16 sums
+%define Q4K_BYTES 144
+%define Q6K_BYTES 210
+%ifndef PREFILL_BLOCK
+%define PREFILL_BLOCK 15            ; prompt tokens per weight pass
+%endif
 section .text
 %include "platform_linux.asm"
 
@@ -36,6 +42,23 @@ generate_prompt:
     mov dword [decode_length],0
     mov byte [decode_final],0
     xor r13d,r13d
+%ifndef DUMP_LAYERS                 ; the diagnostic dumps follow token order
+.block:
+    mov eax,ebp
+    sub eax,r13d
+    mov ecx,PREFILL_BLOCK
+    cmp eax,ecx
+    cmova eax,ecx
+    mov [block_count],eax
+    add eax,r14d
+    cmp eax,[context_limit]
+    ja fail
+    call forward_block
+    add r13d,[block_count]
+    cmp r13,rbp
+    jb .block
+    jmp .logits
+%endif
 .prefill:
     mov eax,[prompt_ids+r13*4]
     call consume_token
@@ -57,7 +80,9 @@ generate_prompt:
     mov edx,logits
     mov ecx,2048
     mov r8d,128000
-    call matvec_q6k
+    mov r9d,matvec_q6k
+    mov r10d,Q6K_BYTES
+    call qmatvec
 %ifdef DUMP_LOGITS
     mov esi,logits
     mov edx,128000*4
@@ -145,10 +170,13 @@ consume_token:
     mov ecx,%4
     mov r8d,%5
 %if L%1_%2_TYPE == 12
-    call matvec_q4k
+    mov r9d,matvec_q4k
+    mov r10d,Q4K_BYTES
 %else
-    call matvec_q6k
+    mov r9d,matvec_q6k
+    mov r10d,Q6K_BYTES
 %endif
+    call qmatvec
 %endmacro
 ; Sandwich norm: the block output is normalized before the residual.
 %macro CLOSE_BLOCK 1
@@ -239,6 +267,227 @@ forward:
     %include "lfm3-layers.inc"
     ret
 
+; Prefill blocks: the same layers over [block_count] tokens. Matrices unpack
+; each weight block once for every token; norms, convolution state, RoPE and
+; attention advance token by token in order, so every value matches forward.
+; ebx indexes the token inside a block; 2048-wide rows are 8192 bytes apart.
+%macro BNORMALIZE 3
+    xor ebx,ebx
+%%token:
+    imul edi,ebx,8192
+    add edi,%1
+    lea rsi,[r15+%2]
+    imul edx,ebx,8192
+    add edx,%3
+    mov ecx,2048
+    call norm_f32
+    inc ebx
+    cmp ebx,[block_count]
+    jb %%token
+%endmacro
+; Source, source stride, width.
+%macro BQUANTIZE 3
+    xor ebx,ebx
+%%token:
+    imul edi,ebx,%2
+    add edi,%1
+    imul esi,ebx,%3/256*Q8K_BYTES
+    add esi,block_activations
+    mov ecx,%3
+    call quantize_q8k
+    inc ebx
+    cmp ebx,[block_count]
+    jb %%token
+%endmacro
+%macro BPROJECT 5
+    mov edi,block_activations
+    lea rsi,[r15+L%1_%2]
+    mov edx,%3
+    mov ecx,%4
+    mov r8d,%5
+    mov r10d,[block_count]
+%if L%1_%2_TYPE == 12
+    mov r9d,matvec_q4k_batch
+    mov r11d,Q4K_BYTES
+%else
+    mov r9d,matvec_q6k_batch
+    mov r11d,Q6K_BYTES
+%endif
+    call qmatvec_batch
+%endmacro
+%macro BCLOSE_BLOCK 1
+    BNORMALIZE block_update,%1,block_update
+    call block_residual
+%endmacro
+%macro BCONV_LAYER 1
+    BNORMALIZE block_hidden,L%1_OP_NORM,block_normalized
+    BQUANTIZE block_normalized,8192,2048
+    BPROJECT %1,IN,block_projection,2048,6144
+    xor ebx,ebx
+%%convolve:
+    imul edi,ebx,6144*4
+    add edi,block_projection
+    lea rsi,[r15+L%1_CONV]
+    mov edx,conv_cache+conv_index*6*8192
+    call conv_step
+    inc ebx
+    cmp ebx,[block_count]
+    jb %%convolve
+    BQUANTIZE block_projection,6144*4,2048
+    BPROJECT %1,OUT,block_update,2048,2048
+    BCLOSE_BLOCK L%1_POST_OP
+    %assign conv_index conv_index+1
+%endmacro
+%macro BATT_LAYER 2
+    BNORMALIZE block_hidden,L%1_OP_NORM,block_normalized
+    BQUANTIZE block_normalized,8192,2048
+    BPROJECT %1,Q,block_query,2048,2048
+    BPROJECT %1,K,block_key,2048,512
+    BPROJECT %1,V,block_value,2048,512
+    BPROJECT %1,GATE,block_headgate,2048,16
+    mov r12,[kv_stride]
+    imul r12,att_index
+    add r12,[kv_base]
+    xor ebx,ebx
+%%rotate:
+    mov r14d,[block_base]
+    add r14d,ebx
+    call prepare_rope
+%if %2
+    mov ecx,64
+    mov r8d,rope_swa
+%else
+    mov ecx,32
+    mov r8d,rope_full
+%endif
+    imul edi,ebx,8192
+    add edi,block_query
+    mov esi,16
+    lea rdx,[r15+L%1_QN]
+    call head_norm_rope
+    imul edi,ebx,2048
+    add edi,block_key
+    mov esi,4
+    lea rdx,[r15+L%1_KN]
+    call head_norm_rope
+    mov edi,r14d
+    shl edi,12
+    add rdi,r12
+    imul esi,ebx,2048
+    add esi,block_key
+    mov ecx,512
+    rep movsd
+    imul esi,ebx,2048
+    add esi,block_value
+    mov ecx,512                 ; the value follows the key in each cache row
+    rep movsd
+    inc ebx
+    cmp ebx,[block_count]
+    jb %%rotate
+    ; Every key and value of the block is cached; each token reads only
+    ; positions up to its own.
+    xor ebx,ebx
+%%attend:
+    mov r14d,[block_base]
+    add r14d,ebx
+    imul esi,ebx,8192
+    add esi,block_query
+    mov edi,query
+    mov ecx,2048
+    rep movsd
+    imul esi,ebx,64
+    add esi,block_headgate
+    mov edi,headgate
+    mov ecx,16
+    rep movsd
+    call sigmoid16
+    xor r10d,r10d
+%if %2
+    lea eax,[r14-255]
+    test eax,eax
+    cmovg r10d,eax
+%endif
+    call attention
+    mov esi,mixed
+    imul edi,ebx,8192
+    add edi,block_mixed
+    mov ecx,2048
+    rep movsd
+    inc ebx
+    cmp ebx,[block_count]
+    jb %%attend
+    mov r14d,[block_base]
+    BQUANTIZE block_mixed,8192,2048
+    BPROJECT %1,OUT,block_update,2048,2048
+    BCLOSE_BLOCK L%1_POST_OP
+    %assign att_index att_index+1
+%endmacro
+%macro BMLP 1
+    BNORMALIZE block_hidden,L%1_FF_NORM,block_normalized
+    BQUANTIZE block_normalized,8192,2048
+    BPROJECT %1,W1,block_gate,2048,7680
+    BPROJECT %1,W3,block_up,2048,7680
+    mov edi,block_gate
+    mov esi,block_up
+    imul edx,[block_count],7680
+    call silu_gate
+    BQUANTIZE block_gate,7680*4,7680
+    BPROJECT %1,W2,block_update,7680,2048
+    BCLOSE_BLOCK L%1_POST_FF
+%endmacro
+
+; Consume prompt_ids[r13..r13+block_count) at positions r14 onward. The last
+; hidden state is copied to hidden for the logits. Advances r14.
+forward_block:
+    push rbx
+    mov [block_base],r14d
+    xor ebx,ebx
+.embed:
+    lea eax,[r13+rbx]
+    mov eax,[prompt_ids+rax*4]
+    imul esi,eax,8*210
+    lea rsi,[r15+rsi+EMBED]
+    imul edi,ebx,8192
+    add edi,block_hidden
+    mov ecx,2048
+    call dequant_q6k_row
+    inc ebx
+    cmp ebx,[block_count]
+    jb .embed
+    %assign conv_index 0
+    %assign att_index 0
+    %define CONV_LAYER BCONV_LAYER
+    %define ATT_LAYER BATT_LAYER
+    %define MLP BMLP
+    %include "lfm3-layers.inc"
+    %undef CONV_LAYER
+    %undef ATT_LAYER
+    %undef MLP
+    mov esi,[block_count]
+    dec esi
+    shl esi,13
+    add esi,block_hidden
+    mov edi,hidden
+    mov ecx,2048
+    rep movsd
+    mov r14d,[block_base]
+    add r14d,[block_count]
+    pop rbx
+    ret
+
+block_residual:
+    imul edx,[block_count],2048
+    xor eax,eax
+.add:
+    vmovups ymm0,[block_hidden+rax*4]
+    vaddps ymm0,ymm0,[block_update+rax*4]
+    vmovups [block_hidden+rax*4],ymm0
+    add eax,8
+    cmp eax,edx
+    jb .add
+    vzeroupper
+    ret
+
 %include "lfm3/kernels.asm"
 %include "expmath.asm"
 %include "threads.asm"
@@ -291,9 +540,24 @@ key: resd 512
 value: resd 512
 headgate: resd 16
 mixed: resd 2048
-scores: resd MAX_CONTEXT
+scores: resd MAX_CONTEXT*MAX_THREADS  ; one row per attention partition
 logits: resd 128000
 activations: resb 30*Q8K_BYTES      ; Q8_K rows up to 7680 wide
+block_count: resd 1
+block_base: resd 1
+alignb 32
+block_hidden: resd PREFILL_BLOCK*2048
+block_normalized: resd PREFILL_BLOCK*2048
+block_update: resd PREFILL_BLOCK*2048
+block_projection: resd PREFILL_BLOCK*6144
+block_gate: resd PREFILL_BLOCK*7680
+block_up: resd PREFILL_BLOCK*7680
+block_query: resd PREFILL_BLOCK*2048
+block_key: resd PREFILL_BLOCK*512
+block_value: resd PREFILL_BLOCK*512
+block_headgate: resd PREFILL_BLOCK*16
+block_mixed: resd PREFILL_BLOCK*2048
+block_activations: resb PREFILL_BLOCK*30*Q8K_BYTES
 kv_base: resq 1
 kv_stride: resq 1
 model_base: resq 1
@@ -301,7 +565,7 @@ conv_cache: resb CONV_STATE_BYTES
 scratch: resd 1
 number: resb 8
 section .data
-matvec_impl: dq 0                   ; the LFM2 worker entry; LFM3 jobs come later
+matvec_impl: dq 0                   ; the LFM2 matvec entry of run_job, unused here
 max_new_tokens: dd 1
 context_limit: dd 512
 section .note.GNU-stack noalloc noexec nowrite progbits
