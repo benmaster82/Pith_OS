@@ -446,7 +446,7 @@ ap_entry:
 .work:
     mov r14d,eax
     mov eax,r13d
-    call run_job
+    call [job_entry]
     lock dec dword [job_remaining]
     jmp .wait
 .park:
@@ -460,12 +460,15 @@ parallel_matvec:
     mov [job_output],rdx
     mov [job_width],ecx
     mov [job_rows],r8d
+    mov qword [job_entry],run_job
+; Run [job_entry] with eax = partition index on every active core.
+dispatch_job:
     mov eax,[thread_count]
     dec eax
     mov [job_remaining],eax
     lock inc dword [job_epoch]
     xor eax,eax
-    call run_job
+    call [job_entry]
 .wait:
     cmp dword [job_remaining],0
     je .done
@@ -522,6 +525,9 @@ job_weights: resq 1
 job_output: resq 1
 job_width: resd 1
 job_rows: resd 1
+job_entry: resq 1
+job_kv: resq 1
+job_position: resd 1
 alignb 16
 worker_stacks: resb (MAX_THREADS-1)*16384
 section .text

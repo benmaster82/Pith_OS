@@ -315,7 +315,7 @@ query: resd 1024
 key: resd 512
 value: resd 512
 mixed: resd 1024
-scores: resd MAX_CONTEXT
+scores: resd MAX_CONTEXT*MAX_THREADS  ; one row per attention partition
 logits: resd 65536
 kv_base: resq 1
 kv_stride: resq 1

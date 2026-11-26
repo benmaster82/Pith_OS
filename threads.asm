@@ -128,7 +128,7 @@ worker_main:
 .work:
     mov r14d,eax
     mov eax,r13d
-    call run_job
+    call [job_entry]
     lock dec dword [job_remaining]
     jnz .wait
     cmp dword [parent_waiting],0
@@ -146,6 +146,9 @@ parallel_matvec:
     mov [job_output],rdx
     mov [job_width],ecx
     mov [job_rows],r8d
+    mov qword [job_entry],run_job
+; Run [job_entry] with eax = partition index on every thread.
+dispatch_job:
     mov eax,[thread_count]
     dec eax
     mov [job_remaining],eax
@@ -157,7 +160,7 @@ parallel_matvec:
     mov eax,202
     syscall
     xor eax,eax                 ; main thread computes partition zero
-    call run_job
+    call [job_entry]
     mov ecx,4000
 .spin:
     cmp dword [job_remaining],0
@@ -225,6 +228,9 @@ job_weights: resq 1
 job_output: resq 1
 job_width: resd 1
 job_rows: resd 1
+job_entry: resq 1
+job_kv: resq 1
+job_position: resd 1
 alignb 64
 worker_stacks: resb (MAX_THREADS-1)*WORKER_STACK
 

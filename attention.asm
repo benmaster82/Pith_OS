@@ -51,7 +51,7 @@ head_norm_rope:
 ; r12 points to interleaved K,V cache rows, each 4096 bytes.
 attention:
     cmp byte [vector_math],0
-    jne attention_avx2
+    jne attention_vector
     xor r8d,r8d
 .head:
     mov eax,r8d
@@ -129,11 +129,46 @@ attention:
     jb .head
     ret
 
+; Heads are independent, so partitions compute whole heads with their own
+; score rows and each head is bit-identical at every thread count. The scalar
+; path stays on the main thread because exp_scalar shares its x87 scratch.
+attention_vector:
+    mov [job_kv],r12
+    mov [job_position],r14d
+    cmp dword [thread_count],1
+    jne .parallel
+    xor eax,eax
+    jmp attention_job
+.parallel:
+    mov qword [job_entry],attention_job
+    jmp dispatch_job
+
+; eax = partition index; heads [index*16/threads, (index+1)*16/threads).
+attention_job:
+    push r12
+    mov r12,[job_kv]
+    mov r10d,[job_position]
+    mov r9d,eax
+    imul esi,eax,MAX_CONTEXT*4
+    add rsi,scores
+    shl eax,4
+    xor edx,edx
+    div dword [thread_count]
+    mov r8d,eax
+    lea eax,[r9+1]
+    shl eax,4
+    xor edx,edx
+    div dword [thread_count]
+    mov edi,eax
+    call attention_avx2
+    pop r12
+    ret
+
 ; AVX2/FMA attention over the same cache layout. The 64 query lanes stay in
 ; ymm8-ymm15 while scoring; one pass over positions then accumulates all value
 ; lanes. The final partial softmax vector is masked on load, store and sum.
+; Heads r8d up to edi, position r10d, score row rsi, KV layer r12.
 attention_avx2:
-    xor r8d,r8d
 .head:
     mov eax,r8d
     shr eax,1
@@ -169,16 +204,16 @@ attention_avx2:
     vmovshdup xmm1,xmm0
     vaddss xmm0,xmm0,xmm1
     vmulss xmm0,xmm0,[inv8]
-    vmovss [scores+rcx*4],xmm0
+    vmovss [rsi+rcx*4],xmm0
     vmaxss xmm6,xmm6,xmm0
     add r9,4096
     inc ecx
-    cmp ecx,r14d
+    cmp ecx,r10d
     jbe .score
     vbroadcastss ymm4,xmm6
     vxorps ymm5,ymm5,ymm5
     xor ecx,ecx
-    lea eax,[r14+1]
+    lea eax,[r10+1]
 .softmax:
     mov edx,eax
     sub edx,ecx
@@ -186,11 +221,11 @@ attention_avx2:
     vmovd xmm6,edx
     vpbroadcastd ymm6,xmm6
     vpcmpgtd ymm6,ymm6,[lane_index8]
-    vmaskmovps ymm0,ymm6,[scores+rcx*4]
+    vmaskmovps ymm0,ymm6,[rsi+rcx*4]
     vsubps ymm0,ymm0,ymm4
     call exp_avx2
     vandps ymm0,ymm0,ymm6
-    vmaskmovps [scores+rcx*4],ymm6,ymm0
+    vmaskmovps [rsi+rcx*4],ymm6,ymm0
     vaddps ymm5,ymm5,ymm0
     add ecx,8
     jmp .softmax
@@ -214,7 +249,7 @@ attention_avx2:
     vxorps ymm15,ymm15,ymm15
     xor ecx,ecx
 .weighted:
-    vbroadcastss ymm0,[scores+rcx*4]
+    vbroadcastss ymm0,[rsi+rcx*4]
     vfmadd231ps ymm8,ymm0,[r9]
     vfmadd231ps ymm9,ymm0,[r9+32]
     vfmadd231ps ymm10,ymm0,[r9+64]
@@ -225,7 +260,7 @@ attention_avx2:
     vfmadd231ps ymm15,ymm0,[r9+224]
     add r9,4096
     inc ecx
-    cmp ecx,r14d
+    cmp ecx,r10d
     jbe .weighted
     vdivps ymm8,ymm8,ymm7
     vdivps ymm9,ymm9,ymm7
@@ -244,7 +279,7 @@ attention_avx2:
     vmovups [r11+192],ymm14
     vmovups [r11+224],ymm15
     inc r8d
-    cmp r8d,16
+    cmp r8d,edi
     jb .head
     vzeroupper
     ret
