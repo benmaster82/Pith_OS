@@ -62,6 +62,12 @@ python3 os/run.py --iso build/lfm3/pithos-core.iso --uefi --usb --cpus 4 --displ
 
 `build/lfm3/pithos-core.iso`, about 1.13 GB, is a hybrid GRUB image for BIOS and UEFI that can be written raw to a USB stick. It holds the kernel, the unchanged GGUF and the tokenizer tables; after boot the kernel works entirely in RAM. The image opens the chat with 256 tokens per answer, a 4,096-position context and up to six CPUs; `OS_KEYMAP` sets the default keyboard layout. It needs 2 GiB of RAM below 4 GiB and a CPU with AVX2, FMA and F16C; Secure Boot must be disabled.
 
+#### Booting a real PC
+
+Pithos CORE has booted on a real laptop, in UEFI mode from a USB stick, with the built-in keyboard working. To write the stick on Windows, open the ISO in [Rufus](https://rufus.ie), press Start and, when Rufus detects an ISOHybrid image, choose **Write in DD Image mode**: ISO mode rebuilds the boot files with Rufus's own and may not start. On Linux, `sudo dd if=build/lfm3/pithos-core.iso of=/dev/sdX bs=4M conv=fsync status=progress`, where `/dev/sdX` is the whole stick, not a partition; everything on it is erased.
+
+On the target machine, disable Secure Boot and pick the stick from the firmware boot menu (often F12, F11, F8 or Esc). Loading the 1.1 GB module takes a while before the console appears. The keyboard is read through the PS/2 controller: laptop keyboards are usually wired that way, while USB keyboards need the firmware's legacy USB emulation (often "USB Legacy Support" or CSM). Without it the chat still appears but does not accept keys.
+
 ### Keyboard layouts
 
 Pithos CORE has thirteen keyboard layouts generated from the XKB data, with Shift, AltGr, Caps Lock and dead keys:

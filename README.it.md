@@ -62,6 +62,12 @@ python3 os/run.py --iso build/lfm3/pithos-core.iso --uefi --usb --cpus 4 --displ
 
 `build/lfm3/pithos-core.iso`, circa 1,13 GB, e un'immagine ibrida GRUB per BIOS e UEFI, scrivibile come immagine raw su una chiavetta. Contiene kernel, GGUF invariato e tabelle del tokenizer; dopo l'avvio il kernel lavora interamente in RAM. L'immagine apre la chat con 256 token per risposta, contesto 4.096 e fino a sei CPU; `OS_KEYMAP` sceglie il layout di tastiera predefinito. Servono 2 GiB di RAM sotto i 4 GiB e una CPU con AVX2, FMA e F16C; Secure Boot va disattivato.
 
+#### Avvio su un PC reale
+
+Pithos CORE e stato avviato su un portatile reale, in UEFI da chiavetta USB, con la tastiera integrata funzionante. Per scrivere la chiavetta su Windows, apri l'ISO in [Rufus](https://rufus.ie), premi Avvia e, quando Rufus rileva un'immagine ISOHybrid, scegli **Scrivi in modalita immagine DD**: la modalita ISO ricostruisce i file di avvio con quelli di Rufus e puo non partire. Su Linux, `sudo dd if=build/lfm3/pithos-core.iso of=/dev/sdX bs=4M conv=fsync status=progress`, dove `/dev/sdX` e l'intera chiavetta e non una partizione; tutto il contenuto viene cancellato.
+
+Sulla macchina di destinazione disattiva Secure Boot e scegli la chiavetta dal menu di avvio del firmware (spesso F12, F11, F8 o Esc). Il caricamento del modulo da 1,1 GB richiede un po' di tempo prima che compaia la console. La tastiera viene letta dal controller PS/2: quella dei portatili di solito e collegata cosi, mentre le tastiere USB richiedono l'emulazione legacy del firmware (spesso "USB Legacy Support" o CSM). Senza, la chat compare ma non riceve i tasti.
+
 ### Layout di tastiera
 
 Pithos CORE ha tredici layout di tastiera generati dai dati XKB, con Shift, AltGr, Caps Lock e tasti morti:
