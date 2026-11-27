@@ -480,6 +480,15 @@ platform_read:
     je .read_done
     cmp al,127
     je .read_done
+%ifdef PITHOS_UI
+    cmp al,10
+    je .echo
+    cmp al,9
+    je .echo
+    cmp al,32
+    jb .read_done              ; Escape and other controls are not echoed
+.echo:
+%endif
     mov rsi,r8
     mov edx,1
     call write_all             ; local echo for the serial terminal

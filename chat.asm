@@ -84,6 +84,13 @@ chat_next_line:
     call option_equal
     test eax,eax
     jnz chat_done
+%ifdef ENGINE_HOOKS
+    mov esi,chat_line
+    mov edi,exit_command
+    call option_equal
+    test eax,eax
+    jnz chat_done
+%endif
     mov esi,chat_line
     mov edi,clear_command
     call option_equal
@@ -232,6 +239,15 @@ chat_readline:
 %endif
     cmp al,10
     je .line
+%ifdef PITHOS_UI
+    cmp al,27
+    je .clear_line              ; Escape clears the line being typed
+    cmp al,9
+    je .store
+    cmp al,32
+    jb .read                    ; other control characters are ignored
+.store:
+%endif
     test al,al
     jz .reject
     cmp r12d,TEXT_BYTES-1
@@ -258,6 +274,26 @@ chat_readline:
     mov edx,3
     call chat_write
     jmp .read
+%endif
+%ifdef PITHOS_UI
+.clear_line:
+    xor r13d,r13d
+.clear_next:
+    test r12d,r12d
+    jz .read
+.clear_codepoint:
+    dec r12d
+    mov al,[chat_line+r12]
+    and al,0xc0
+    cmp al,0x80
+    jne .clear_display
+    test r12d,r12d
+    jnz .clear_codepoint
+.clear_display:
+    mov esi,serial_erase
+    mov edx,3
+    call chat_write
+    jmp .clear_next
 %endif
 .reject:
     mov r13d,1
@@ -309,6 +345,9 @@ section .rodata
 %endif
 context_env: db "LFM_CONTEXT="
 quit_command: db "/quit",0
+%ifdef ENGINE_HOOKS
+exit_command: db "/exit",0
+%endif
 clear_command: db "/clear",0
 chat_banner: db CHAT_BANNER,10
 chat_banner_len equ $-chat_banner

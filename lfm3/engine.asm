@@ -279,6 +279,7 @@ engine_ready:
 
 ; rbp = prompt tokens of this turn, r14 = cache position.
 engine_turn_start:
+    mov byte [turn_over],0
     mov byte [generating],1
     call engine_ticks
     mov [stat_start],rax
@@ -332,6 +333,12 @@ engine_progress:
     call engine_show_status
 .interrupt:
     pop rax
+    cmp byte [turn_over],0
+    je .escape
+    mov byte [turn_over],0
+    mov eax,1
+    ret
+.escape:
     cmp byte [chat_mode],0
     je .continue
     call engine_interrupted
@@ -381,7 +388,13 @@ engine_emit:
 %endif
 .close:
     cmp byte [in_think],0
-    je .done
+    jne .closed
+    ; A closing tag outside reasoning: the model has answered and would
+    ; repeat the answer. End the turn here as if it had written EOS.
+    mov dword [next_token],EOS_ID
+    mov byte [turn_over],1
+    ret
+.closed:
     mov byte [in_think],0
     cmp byte [think_show],0
     je .collapsed
@@ -1155,6 +1168,7 @@ think_mode: resb 1
 in_think: resb 1
 stat_stopped: resb 1
 generating: resb 1
+turn_over: resb 1
 alignb 8
 random_state: resq 1
 clock_buffer: resq 2
