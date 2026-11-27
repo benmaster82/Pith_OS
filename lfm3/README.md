@@ -40,7 +40,7 @@ make lfm3-os-image LFM3_MODEL=LFM3-1.7B-Q4_K_M.gguf LFM3_TOKENIZER=/opt/lfm3-ref
 python3 os/run.py --iso build/lfm3/pithos-core.iso --cpus 4 --display gtk
 ~~~
 
-The `build/lfm3/pithos-core.iso` image starts the chat with 256 tokens per answer, a 4,096-position context and at most six processors. With 2 GiB of RAM about 0.9 GiB remains for the cache, about 20,000 positions; a 32,768-position context needs 3 GiB. Besides AVX2 and FMA, secondary processors must support F16C; those that do not stay parked.
+The `build/lfm3/pithos-core.iso` image starts the chat with 1,024 tokens per answer, an 8,192-position context and at most six processors. With 2 GiB of RAM about 0.9 GiB remains for the cache, about 20,000 positions; a 32,768-position context needs 3 GiB. Besides AVX2 and FMA, secondary processors must support F16C; those that do not stay parked.
 
 `make verify-lfm3-os` compares the kernel in QEMU/KVM with the Linux executable: the bundle preserves GGUF and tables, five greedy sequences and three text answers match, the 64-token sequence matches on 2, 3, 4 and 6 active processors, and all 128,000 logits are bitwise identical on 1 and 4 processors. It also checks the serial chat with history, backspace, invalid input and `/clear`, the exact cache capacity, the refusal of CPUs without AVX2, F16C or XSAVE, invalid options, a missing or corrupt module and insufficient RAM.
 
@@ -59,7 +59,7 @@ The chat commands also work in the Linux executable:
 | Command | Effect |
 | --- | --- |
 | `/set temp 0.7` | sampling with a temperature; 0 is the default greedy decoding |
-| `/set top-k 50`, `top-p 0.95`, `min-p 0.05`, `repeat 1.1`, `seed 42`, `tokens 256` | candidate filters, repetition penalty, seed and tokens per answer |
+| `/set top-k 50`, `top-p 0.95`, `min-p 0.05`, `repeat 1.1`, `seed 42`, `tokens 2048` | candidate filters, repetition penalty, seed and maximum tokens per answer, up to the context |
 | `/think on`, `/think off` | `<think>` reasoning before the answer |
 | `/think show`, `/think hide` | reasoning shown dim or summarised by its token count |
 | `/system TEXT` | system prompt; restarts the conversation |

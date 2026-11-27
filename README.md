@@ -24,6 +24,7 @@
   <a href="#build-and-usage">Quick start</a> ·
   <a href="#pithos-core-in-qemu-from-cd-or-usb">Boot from CD or USB</a> ·
   <a href="#console-and-commands">Console</a> ·
+  <a href="#boot-options-and-limits">Options and limits</a> ·
   <a href="#keyboard-layouts">Keyboard layouts</a> ·
   <a href="#performance">Performance</a> ·
   <a href="lfm3/README.md">LFM3 internals</a> ·
@@ -60,13 +61,44 @@ python3 os/run.py --iso build/lfm3/pithos-core.iso --cpus 4 --display gtk
 python3 os/run.py --iso build/lfm3/pithos-core.iso --uefi --usb --cpus 4 --display gtk
 ~~~
 
-`build/lfm3/pithos-core.iso`, about 1.13 GB, is a hybrid GRUB image for BIOS and UEFI that can be written raw to a USB stick. It holds the kernel, the unchanged GGUF and the tokenizer tables; after boot the kernel works entirely in RAM. The image opens the chat with 256 tokens per answer, a 4,096-position context and up to six CPUs; `OS_KEYMAP` sets the default keyboard layout. It needs 2 GiB of RAM below 4 GiB and a CPU with AVX2, FMA and F16C; Secure Boot must be disabled.
+`build/lfm3/pithos-core.iso`, about 1.13 GB, is a hybrid GRUB image for BIOS and UEFI that can be written raw to a USB stick. It holds the kernel, the unchanged GGUF and the tokenizer tables; after boot the kernel works entirely in RAM. The image opens the chat with 1,024 tokens per answer, an 8,192-position context and up to six CPUs ([options and limits](#boot-options-and-limits)); `OS_KEYMAP` sets the default keyboard layout. It needs 2 GiB of RAM below 4 GiB and a CPU with AVX2, FMA and F16C; Secure Boot must be disabled.
 
 #### Booting a real PC
 
 Pithos CORE has booted on a real laptop, in UEFI mode from a USB stick, with the built-in keyboard working. To write the stick on Windows, open the ISO in [Rufus](https://rufus.ie), press Start and, when Rufus detects an ISOHybrid image, choose **Write in DD Image mode**: ISO mode rebuilds the boot files with Rufus's own and may not start. On Linux, `sudo dd if=build/lfm3/pithos-core.iso of=/dev/sdX bs=4M conv=fsync status=progress`, where `/dev/sdX` is the whole stick, not a partition; everything on it is erased.
 
 On the target machine, disable Secure Boot and pick the stick from the firmware boot menu (often F12, F11, F8 or Esc). Loading the 1.1 GB module takes a while before the console appears. The keyboard is read through the PS/2 controller: laptop keyboards are usually wired that way, while USB keyboards need the firmware's legacy USB emulation (often "USB Legacy Support" or CSM). Without it the chat still appears but does not accept keys.
+
+### Boot options and limits
+
+The ISO embeds its kernel options in `grub.cfg`; they are chosen when the image is built, through make variables that apply to either model:
+
+| Option | Make variable | LFM3 default | LFM2.5 default | Meaning |
+| --- | --- | --- | --- | --- |
+| `tokens=` | `OS_TOKENS` | 1,024 | 512 | maximum tokens per answer, reasoning included; at most the context |
+| `context=` | `OS_CONTEXT` | 8,192 | 4,096 | positions for the whole conversation: system prompt, history and answers; 1 to 32,768 |
+| `threads=` | `OS_THREADS` | 6 | 6 | CPUs used, 1 to 16, never more than the machine has |
+| `keymap=` | `OS_KEYMAP` | `us` | `us` | keyboard layout, see below |
+
+~~~sh
+make lfm3-os-image LFM3_MODEL=weights/LFM3-1.7B-Q4_K_M.gguf LFM3_TOKENIZER=lfm3-ref/tokenizer.json OS_TOKENS=2048 OS_CONTEXT=16384 OS_KEYMAP=it
+~~~
+
+Changing a variable rebuilds only the ISO. The FP32 KV cache takes 44 KiB per position with LFM3 and 24 KiB with LFM2.5, and must fit in the RAM below 4 GiB next to the model; if it does not, the kernel stops at boot with an error.
+
+| Context | LFM3 cache | LFM2.5 cache |
+| --- | --- | --- |
+| 4,096 | 176 MiB | 96 MiB |
+| 8,192 | 352 MiB | 192 MiB |
+| 16,384 | 704 MiB | 384 MiB |
+| 32,768 | 1.4 GiB | 768 MiB |
+
+With 2 GiB of RAM, LFM3 reaches about 20,000 positions; 32,768 needs 3 GiB. During the chat two notices refer to these limits:
+
+- *Response reached the token limit. The assistant turn was closed.* The answer used all its tokens and was cut. `/set tokens 2048` raises the limit up to the context size, without rebooting.
+- *Context full. Use /clear or reboot with a larger context= value.* The conversation filled the context. `/clear` starts a new one; a larger `OS_CONTEXT` gives longer conversations.
+
+The status line and `/stats` show the context in use, for example `ctx 220/8192`.
 
 ### Keyboard layouts
 
@@ -88,7 +120,7 @@ make lfm3-os-image LFM3_MODEL=weights/LFM3-1.7B-Q4_K_M.gguf LFM3_TOKENIZER=lfm3-
 make os-image MODEL=weights/model.safetensors OS_KEYMAP=fr
 ~~~
 
-With `os/image.py` the layout is a kernel option, for example `--options "mode=chat tokens=256 context=4096 threads=6 keymap=es"`. Once booted, `/keymap uk` switches the layout during the chat without restarting; the current layout is shown at the end of the status line. Rebuilding with a different `OS_KEYMAP` only regenerates the ISO, not the kernel or the bundle.
+With `os/image.py` the layout is a kernel option, for example `--options "mode=chat tokens=1024 context=8192 threads=6 keymap=es"`. Once booted, `/keymap uk` switches the layout during the chat without restarting; the current layout is shown at the end of the status line. Rebuilding with a different `OS_KEYMAP` only regenerates the ISO, not the kernel or the bundle.
 
 ### Console and commands
 
@@ -97,7 +129,7 @@ The console shows the Pithos mark, the model, the conversation with word wrappin
 | Command | Effect |
 | --- | --- |
 | `/set temp 0.7` | sampling with a temperature; 0 is the default greedy decoding |
-| `/set top-k 50`, `top-p 0.95`, `min-p 0.05`, `repeat 1.1`, `seed 42`, `tokens 256` | candidate filters, repetition penalty, seed and tokens per answer |
+| `/set top-k 50`, `top-p 0.95`, `min-p 0.05`, `repeat 1.1`, `seed 42`, `tokens 2048` | candidate filters, repetition penalty, seed and maximum tokens per answer, up to the context |
 | `/think on`, `/think off`, `/think show`, `/think hide` | reasoning before the answer, shown dim or summarised |
 | `/system TEXT` | system prompt; restarts the conversation |
 | `/stats`, `/set`, `/reset`, `/help`, `/clear`, `/quit` | statistics, settings, defaults, help, new conversation, exit |
@@ -232,7 +264,7 @@ python3 os/run.py --iso build/lfm-os.iso --uefi --usb --display gtk
 
 `build/lfm-os.iso` is a hybrid GRUB image of about 729 MB holding the kernel, the tokenizer and the unchanged BF16 checkpoint. It can be written raw to a USB stick to boot an x86-64 machine with BIOS or UEFI. The build only creates the ISO file and never writes to physical devices. GRUB reads the data from the medium and hands it to the kernel; after boot the kernel works entirely in RAM and does not access the filesystem.
 
-The image starts the chat with 64 tokens per answer, a 2,048-position context and at most six active CPUs. The parameters are embedded in `grub.cfg`; the launcher can change virtual CPUs and RAM but rejects kernel parameters that could not change the image. For an image with different limits:
+The image starts the chat with 512 tokens per answer, a 4,096-position context and at most six active CPUs. The parameters are embedded in `grub.cfg`; the launcher can change virtual CPUs and RAM but rejects kernel parameters that could not change the image. For an image with different limits:
 
 ~~~sh
 python3 os/image.py build/lfm-os.elf build/lfm-boot.bundle build/lfm-os.iso --options "mode=chat tokens=128 context=4096 threads=4 keymap=it"

@@ -72,15 +72,18 @@ os: build/lfm-os.elf $(OS_BUNDLE)
 
 os-image: $(OS_IMAGE)
 
+# Boot options baked into the ISOs. OS_TOKENS, OS_CONTEXT and OS_THREADS apply to both images;
+# when unset, each model keeps its own defaults.
 OS_KEYMAP ?= us
-# The keymap is an option baked into the ISO: a stamp rewritten only when it changes rebuilds the image.
-$(OS_IMAGE).keymap: FORCE
+OS_OPTIONS = mode=chat tokens=$(or $(OS_TOKENS),512) context=$(or $(OS_CONTEXT),4096) threads=$(or $(OS_THREADS),6) keymap=$(OS_KEYMAP)
+# A stamp rewritten only when the options change rebuilds the image.
+$(OS_IMAGE).options: FORCE
 	@mkdir -p $(dir $@)
-	@echo '$(OS_KEYMAP)' | cmp -s - $@ || echo '$(OS_KEYMAP)' > $@
-$(OS_IMAGE): build/lfm-os.elf $(OS_BUNDLE) $(OS_IMAGE).keymap os/image.py os/FONT-LICENSE.txt os/CONSOLE-FONTS-LICENSE.txt os/KEYMAPS-LICENSE.txt LICENSE
+	@echo '$(OS_OPTIONS)' | cmp -s - $@ || echo '$(OS_OPTIONS)' > $@
+$(OS_IMAGE): build/lfm-os.elf $(OS_BUNDLE) $(OS_IMAGE).options os/image.py os/FONT-LICENSE.txt os/CONSOLE-FONTS-LICENSE.txt os/KEYMAPS-LICENSE.txt LICENSE
 	$(PYTHON) os/image.py build/lfm-os.elf "$(OS_BUNDLE)" "$(OS_IMAGE)" --title "Pithos CORE LFM2.5-350M" \
 		--license os/CONSOLE-FONTS-LICENSE.txt --license os/KEYMAPS-LICENSE.txt --license LICENSE \
-		--options "mode=chat tokens=64 context=2048 threads=6 keymap=$(OS_KEYMAP)"
+		--options "$(OS_OPTIONS)"
 
 os-run: os
 	$(PYTHON) os/run.py "$(OS_BUNDLE)"
@@ -210,13 +213,14 @@ build/lfm3/%.elf: build/lfm3/%.elf64
 	objcopy -O elf32-i386 $< $@
 
 LFM3_KEYMAP ?= $(OS_KEYMAP)
-$(LFM3_OS_IMAGE).keymap: FORCE
+LFM3_OS_OPTIONS = mode=chat tokens=$(or $(OS_TOKENS),1024) context=$(or $(OS_CONTEXT),8192) threads=$(or $(OS_THREADS),6) keymap=$(LFM3_KEYMAP)
+$(LFM3_OS_IMAGE).options: FORCE
 	@mkdir -p $(dir $@)
-	@echo '$(LFM3_KEYMAP)' | cmp -s - $@ || echo '$(LFM3_KEYMAP)' > $@
-$(LFM3_OS_IMAGE): build/lfm3/lfm3-os.elf $(LFM3_BUNDLE) $(LFM3_OS_IMAGE).keymap os/image.py os/FONT-LICENSE.txt os/CONSOLE-FONTS-LICENSE.txt os/KEYMAPS-LICENSE.txt LICENSE
+	@echo '$(LFM3_OS_OPTIONS)' | cmp -s - $@ || echo '$(LFM3_OS_OPTIONS)' > $@
+$(LFM3_OS_IMAGE): build/lfm3/lfm3-os.elf $(LFM3_BUNDLE) $(LFM3_OS_IMAGE).options os/image.py os/FONT-LICENSE.txt os/CONSOLE-FONTS-LICENSE.txt os/KEYMAPS-LICENSE.txt LICENSE
 	$(PYTHON) os/image.py build/lfm3/lfm3-os.elf "$(LFM3_BUNDLE)" "$(LFM3_OS_IMAGE)" --title "Pithos CORE" \
 		--license os/CONSOLE-FONTS-LICENSE.txt --license os/KEYMAPS-LICENSE.txt --license LICENSE \
-		--options "mode=chat tokens=256 context=4096 threads=6 keymap=$(LFM3_KEYMAP)"
+		--options "$(LFM3_OS_OPTIONS)"
 
 verify-lfm3-os: lfm3-os build/lfm3/lfm3-os-logits.elf build/lfm3/lfm3-next build/lfm3/lfm3-logits
 	$(PYTHON) lfm3/verify_os.py "$(LFM3_MODEL)" "$(LFM3_BUNDLE)"

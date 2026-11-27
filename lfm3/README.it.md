@@ -40,7 +40,7 @@ make lfm3-os-image LFM3_MODEL=LFM3-1.7B-Q4_K_M.gguf LFM3_TOKENIZER=/opt/lfm3-ref
 python3 os/run.py --iso build/lfm3/pithos-core.iso --cpus 4 --display gtk
 ~~~
 
-L'immagine `build/lfm3/pithos-core.iso` avvia la chat con 256 token per risposta, contesto 4.096 e al massimo sei processori. Con 2 GiB di RAM restano circa 0,9 GiB per la cache, cioè circa 20.000 posizioni; il contesto di 32.768 posizioni richiede 3 GiB. Oltre ad AVX2 e FMA, i processori secondari devono offrire F16C; quelli che non lo offrono restano fermi.
+L'immagine `build/lfm3/pithos-core.iso` avvia la chat con 1.024 token per risposta, contesto 8.192 e al massimo sei processori. Con 2 GiB di RAM restano circa 0,9 GiB per la cache, cioè circa 20.000 posizioni; il contesto di 32.768 posizioni richiede 3 GiB. Oltre ad AVX2 e FMA, i processori secondari devono offrire F16C; quelli che non lo offrono restano fermi.
 
 `make verify-lfm3-os` confronta il kernel in QEMU/KVM con l'eseguibile Linux: il bundle conserva GGUF e tabelle, cinque sequenze greedy e tre risposte testuali coincidono, la sequenza di 64 token coincide con 2, 3, 4 e 6 processori attivi, e tutti i 128.000 logit sono identici bit per bit con 1 e 4 processori. Sono verificati anche la chat seriale con cronologia, backspace, input non valido e `/clear`, la capacita esatta della cache, il rifiuto delle CPU senza AVX2, F16C o XSAVE, le opzioni non valide, il modulo mancante o corrotto e la RAM insufficiente.
 
@@ -57,7 +57,7 @@ I comandi della chat valgono anche nell'eseguibile Linux:
 | Comando | Effetto |
 | --- | --- |
 | `/set temp 0.7` | campionamento con temperatura; 0 e la decodifica greedy predefinita |
-| `/set top-k 50`, `top-p 0.95`, `min-p 0.05`, `repeat 1.1`, `seed 42`, `tokens 256` | filtri dei candidati, penalita di ripetizione, seme e token per risposta |
+| `/set top-k 50`, `top-p 0.95`, `min-p 0.05`, `repeat 1.1`, `seed 42`, `tokens 2048` | filtri dei candidati, penalita di ripetizione, seme e token massimi per risposta, fino al contesto |
 | `/think on`, `/think off` | ragionamento `<think>` prima della risposta |
 | `/think show`, `/think hide` | ragionamento attenuato oppure riassunto dal numero di token |
 | `/system TESTO` | system prompt; riavvia la conversazione |
