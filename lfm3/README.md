@@ -42,6 +42,29 @@ L'immagine `build/lfm3/pithos-core.iso` avvia la chat con 256 token per risposta
 
 `make verify-lfm3-os` confronta il kernel in QEMU/KVM con l'eseguibile Linux: il bundle conserva GGUF e tabelle, cinque sequenze greedy e tre risposte testuali coincidono, la sequenza di 64 token coincide con 2, 3, 4 e 6 processori attivi, e tutti i 128.000 logit sono identici bit per bit con 1 e 4 processori. Sono verificati anche la chat seriale con cronologia, backspace, input non valido e `/clear`, la capacita esatta della cache, il rifiuto delle CPU senza AVX2, F16C o XSAVE, le opzioni non valide, il modulo mancante o corrotto e la RAM insufficiente.
 
+### Console e opzioni
+
+Con un framebuffer, cioe nell'avvio da ISO, Pithos CORE mostra un'interfaccia minimale con la palette dell'interfaccia web di pithos: un'intestazione con il marchio di Pithos di 24 pixel, il nome e il modello, la conversazione con un a capo per parola, e una barra di stato con velocita di generazione, velocita del prompt, tempo del primo token, contesto usato, decodifica, ragionamento, processori e layout di tastiera. I messaggi dell'utente iniziano con un segno ambra, le notifiche sono attenuate e il markdown `**grassetto**` appare in bianco pieno senza asterischi. La porta seriale riceve lo stesso testo con le stesse sequenze di colore ANSI. Senza framebuffer, nell'avvio diretto di QEMU, resta la console VGA testuale.
+
+I glifi vengono generati in fase di build da `os/ui_font.py`: DejaVu Sans Mono con antialiasing per latino, greco, cirillico e simboli, GNU Unifont per il resto del piano Unicode di base, compresi cinese, giapponese e coreano su due celle, e Noto Color Emoji a colori, ridotte a 16x16. Il file occupa 3,5 MB e contiene anche il marchio. Le sequenze di emoji composte si vedono come componenti separati, e arabo e scritture indiane appaiono senza legature e, per l'arabo, da sinistra a destra. Le licenze sono in `os/FONT-LICENSE.txt` e `os/CONSOLE-FONTS-LICENSE.txt`, copiate anche nell'immagine.
+
+La tastiera segue tredici layout generati dai dati XKB con `ckbcomp` (`os/keymaps.py`, `make keymaps`): us, uk, it, de, fr, es, pt, br, ch, se, fi, no e dk, con Shift, AltGr, Caps Lock e tasti morti. Il layout si sceglie all'avvio con `keymap=it`, nell'immagine con `make lfm3-os-image LFM3_KEYMAP=it`, oppure durante la chat con `/keymap it`. In QEMU sono stati verificati i caratteri prodotti da it, fr, de, es, uk, pt, se, ch e us, compresi tasti morti, AltGr, `ß`, `ñ`, `å` e `£`.
+
+I comandi della chat valgono anche nell'eseguibile Linux:
+
+| Comando | Effetto |
+| --- | --- |
+| `/set temp 0.7` | campionamento con temperatura; 0 e la decodifica greedy predefinita |
+| `/set top-k 50`, `top-p 0.95`, `min-p 0.05`, `repeat 1.1`, `seed 42`, `tokens 256` | filtri dei candidati, penalita di ripetizione, seme e token per risposta |
+| `/think on`, `/think off` | ragionamento `<think>` prima della risposta |
+| `/think show`, `/think hide` | ragionamento attenuato oppure riassunto dal numero di token |
+| `/system TESTO` | system prompt; riavvia la conversazione |
+| `/stats`, `/set`, `/reset`, `/help` | statistiche, impostazioni, valori predefiniti, aiuto |
+| `/keymap it` | layout di tastiera, solo in Pithos CORE |
+| Esc | interrompe la risposta, solo in Pithos CORE |
+
+Il campionamento segue l'ordine di llama.cpp: penalita di ripetizione sugli ultimi 64 token, i migliori `top-k` candidati, softmax con temperatura, `min-p` rispetto al candidato migliore, `top-p` e un'estrazione con xorshift64*. Con lo stesso seme le risposte si ripetono identiche, con `top-k 1` coincidono con la decodifica greedy. Con le impostazioni predefinite logit, generazione e risposte della chat restano identici bit per bit alla versione precedente. Il ragionamento resta nel contesto della conversazione, mentre il template ufficiale lo toglie dai turni passati.
+
 ## Implementazione
 
 - `layout.py` legge il GGUF in fase di build, verifica metadati, forme e tipi di tutti i 287 tensori e genera offset, tipi e la sequenza degli strati presa dal checkpoint. L'eseguibile controlla all'avvio un hash FNV-1a dell'intestazione GGUF, 8.247.328 byte.

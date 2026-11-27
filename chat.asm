@@ -63,6 +63,9 @@ chat_loop:
     mov esi,chat_banner
     mov edx,chat_banner_len
     call chat_write
+%ifdef ENGINE_HOOKS
+    call engine_ready
+%endif
 chat_next_line:
     mov esi,user_label
     mov edx,user_label_len
@@ -87,11 +90,27 @@ chat_next_line:
     test eax,eax
     jnz chat_clear
     cmp byte [chat_line],'/'
+%ifdef ENGINE_HOOKS
+    jne .message
+    call extra_command          ; 1 handled, 2 handled with a fresh conversation
+    cmp eax,1
+    je chat_next_line
+    ja chat_clear
+    jmp chat_unknown_command
+.message:
+%else
     je chat_unknown_command
+%endif
 
     ; All tokenizer failures in this stage can safely recover before inference.
     mov byte [chat_tokenizing],1
     mov edi,text_buffer
+%ifdef ENGINE_HOOKS
+    call engine_prefix
+    mov esi,chat_line
+    call copy_text
+    call engine_suffix
+%else
     mov esi,chat_user_prefix
     cmp dword [cache_position],0
     jne .prefix
@@ -102,6 +121,7 @@ chat_next_line:
     call copy_text
     mov esi,chat_suffix
     call copy_text
+%endif
     mov esi,text_buffer
     call encode_text
     mov byte [chat_tokenizing],0
@@ -272,30 +292,45 @@ chat_readline:
     ret
 
 section .rodata
+%ifndef CHAT_USER_LABEL
+%define CHAT_USER_LABEL "user> "
+%define CHAT_ASSISTANT_LABEL "assistant> "
+%endif
+%ifndef CHAT_BANNER
+%define CHAT_BANNER "Chat ready. /clear resets the conversation. /quit exits."
+%endif
+; Status notices may carry a dim colour for the Pithos CORE console.
+%ifdef CHAT_STYLE
+%define NOTICE_ON 27,"[2m",
+%define NOTICE_OFF ,27,"[0m"
+%else
+%define NOTICE_ON
+%define NOTICE_OFF
+%endif
 context_env: db "LFM_CONTEXT="
 quit_command: db "/quit",0
 clear_command: db "/clear",0
-chat_banner: db "Chat ready. /clear resets the conversation. /quit exits.",10
+chat_banner: db CHAT_BANNER,10
 chat_banner_len equ $-chat_banner
-user_label: db "user> "
+user_label: db CHAT_USER_LABEL
 user_label_len equ $-user_label
-assistant_label: db "assistant> "
+assistant_label: db CHAT_ASSISTANT_LABEL
 assistant_label_len equ $-assistant_label
 chat_newline: db 10
-clear_notice: db "Conversation cleared.",10
+clear_notice: db NOTICE_ON "Conversation cleared.",10 NOTICE_OFF
 clear_notice_len equ $-clear_notice
 %ifdef BARE_METAL
 serial_erase: db 8,' ',8
-context_notice: db "Context full. Use /clear or reboot with a larger context= value.",10
+context_notice: db NOTICE_ON "Context full. Use /clear or reboot with a larger context= value.",10 NOTICE_OFF
 %else
-context_notice: db "Context full. Use /clear or restart with a larger LFM_CONTEXT.",10
+context_notice: db NOTICE_ON "Context full. Use /clear or restart with a larger LFM_CONTEXT.",10 NOTICE_OFF
 %endif
 context_notice_len equ $-context_notice
-command_notice: db "Unknown command. Use /clear or /quit.",10
+command_notice: db NOTICE_ON "Unknown command. Use /clear or /quit.",10 NOTICE_OFF
 command_notice_len equ $-command_notice
-input_notice: db "Input rejected. Check UTF-8, byte and context limits, or use /clear.",10
+input_notice: db NOTICE_ON "Input rejected. Check UTF-8, byte and context limits, or use /clear.",10 NOTICE_OFF
 input_notice_len equ $-input_notice
-limit_notice: db "Response reached the token limit. The assistant turn was closed.",10
+limit_notice: db NOTICE_ON "Response reached the token limit. The assistant turn was closed.",10 NOTICE_OFF
 limit_notice_len equ $-limit_notice
 input_error: db "Failed to read chat input.",10
 input_error_len equ $-input_error

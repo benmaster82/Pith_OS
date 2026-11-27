@@ -119,7 +119,7 @@ build/lfm-os-logits.elf: build/lfm-os-logits.elf64
 # LFM3-1.7B GGUF runtime. The tokenizer tables sit beside the executable.
 LFM3_MODEL ?= LFM3-1.7B-Q4_K_M.gguf
 LFM3_TOKENIZER ?= lfm3-ref/tokenizer.json
-LFM3_SOURCES = lfm3/main.asm lfm3/kernels.asm lfm3/frequencies.inc platform_linux.asm threads.asm \
+LFM3_SOURCES = lfm3/main.asm lfm3/kernels.asm lfm3/engine.asm lfm3/frequencies.inc platform_linux.asm threads.asm \
 	tokenizer.asm chat.asm util.asm expmath.asm expmath_data.inc \
 	build/lfm3/layout.inc build/lfm3/lfm3-layers.inc build/lfm3/tokenizer.inc
 .PHONY: lfm3
@@ -168,8 +168,17 @@ verify-lfm3-tokenizer: build/lfm3/lfm3-next
 # and tokenizer tables in one boot module.
 LFM3_BUNDLE ?= build/lfm3/lfm3-boot.bundle
 LFM3_OS_IMAGE ?= build/lfm3/pithos-core.iso
-LFM3_OS_SOURCES = $(LFM3_SOURCES) os/platform.asm os/multiboot.asm os/smp.asm os/console.asm \
-	build/lfm3/boot_bundle.inc build/console-font.bin
+LFM3_OS_SOURCES = $(LFM3_SOURCES) os/platform.asm os/multiboot.asm os/smp.asm os/ui.asm os/keymaps.inc \
+	build/lfm3/boot_bundle.inc build/pithos-font.bin
+
+# Console glyphs (DejaVu, GNU Unifont, Noto Color Emoji) and the Pithos mark.
+build/pithos-font.bin: os/ui_font.py os/assets/pithos-mark.png | build
+	$(FONT_PYTHON) os/ui_font.py os/assets/pithos-mark.png $@
+
+# Regenerating the layouts needs ckbcomp (console-setup) and the XKB data.
+.PHONY: keymaps
+keymaps:
+	$(FONT_PYTHON) os/keymaps.py os/keymaps.inc
 .PHONY: lfm3-os lfm3-os-image verify-lfm3-os
 lfm3-os: build/lfm3/lfm3-os.elf $(LFM3_BUNDLE)
 
@@ -193,9 +202,11 @@ build/lfm3/lfm3-os-logits.elf64: build/os-boot.o build/lfm3/os-logits.o os/linke
 build/lfm3/%.elf: build/lfm3/%.elf64
 	objcopy -O elf32-i386 $< $@
 
-$(LFM3_OS_IMAGE): build/lfm3/lfm3-os.elf $(LFM3_BUNDLE) os/image.py os/FONT-LICENSE.txt
+LFM3_KEYMAP ?= us
+$(LFM3_OS_IMAGE): build/lfm3/lfm3-os.elf $(LFM3_BUNDLE) os/image.py os/FONT-LICENSE.txt os/CONSOLE-FONTS-LICENSE.txt
 	$(PYTHON) os/image.py build/lfm3/lfm3-os.elf "$(LFM3_BUNDLE)" "$(LFM3_OS_IMAGE)" --title "Pithos CORE" \
-		--options "mode=chat tokens=256 context=4096 threads=6"
+		--license os/CONSOLE-FONTS-LICENSE.txt \
+		--options "mode=chat tokens=256 context=4096 threads=6 keymap=$(LFM3_KEYMAP)"
 
 verify-lfm3-os: lfm3-os build/lfm3/lfm3-os-logits.elf build/lfm3/lfm3-next build/lfm3/lfm3-logits
 	$(PYTHON) lfm3/verify_os.py "$(LFM3_MODEL)" "$(LFM3_BUNDLE)"

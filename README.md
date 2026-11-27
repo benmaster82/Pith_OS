@@ -59,7 +59,9 @@ Le modalita diagnostiche `--encode "testo"` e `--decode ID ...` espongono il tok
 
 ## LFM3-1.7B
 
-Un secondo eseguibile Linux, `build/lfm3/lfm3-next`, esegue LiquidAI LFM3-1.7B dal GGUF Q4_K_M con le stesse opzioni, condividendo piattaforma, thread, tokenizer e chat. Usa attivazioni Q8_K e prodotti interi con le righe Q4_K e Q6_K, worker paralleli e prefill a blocchi. Build, verifica e differenze rispetto a LFM2.5 sono descritte in [lfm3/README.md](lfm3/README.md).
+Un secondo eseguibile Linux, `build/lfm3/lfm3-next`, esegue LiquidAI LFM3-1.7B dal GGUF Q4_K_M con le stesse opzioni, condividendo piattaforma, thread, tokenizer e chat. Usa attivazioni Q8_K e prodotti interi con le righe Q4_K e Q6_K, worker paralleli e prefill a blocchi, e offre campionamento, ragionamento, system prompt e statistiche tramite comandi della chat.
+
+Lo stesso runtime si avvia come kernel autonomo, Pithos CORE, da QEMU o dall'immagine `build/lfm3/pithos-core.iso`, con una console grafica Unicode, emoji a colori e tredici layout di tastiera. Build, verifica, interfaccia e differenze rispetto a LFM2.5 sono descritte in [lfm3/README.md](lfm3/README.md).
 
 ## Avvio come kernel in QEMU
 

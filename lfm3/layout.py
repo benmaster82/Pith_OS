@@ -109,7 +109,9 @@ def generate(path):
              f"%define HEADER_HASH 0x{fnv1a(header):08x}",
              f"%define BOS_ID {meta['tokenizer.ggml.bos_token_id']}",
              f"%define EOS_ID {meta['tokenizer.ggml.eos_token_id']}",
-             f"%define NEWLINE_ID {meta['tokenizer.ggml.tokens'].index(chr(0x10a))}"]
+             f"%define NEWLINE_ID {meta['tokenizer.ggml.tokens'].index(chr(0x10a))}",
+             f"%define THINK_OPEN {meta['tokenizer.ggml.tokens'].index('<think>')}",
+             f"%define THINK_CLOSE {meta['tokenizer.ggml.tokens'].index('</think>')}"]
     used = set()
     for tag, name, shape, types in expected(meta):
         if tag is None:

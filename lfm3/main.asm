@@ -16,8 +16,16 @@ default abs
 %ifndef PREFILL_BLOCK
 %define PREFILL_BLOCK 15            ; prompt tokens per weight pass
 %endif
+%define ENGINE_HOOKS                ; sampling, reasoning, system prompt, commands
+%define CHAT_BANNER "Chat ready. /help lists the commands, /quit exits."
 section .text
 %ifdef BARE_METAL
+; The Pithos CORE console: an amber prompt mark, bright user text, dim notices.
+%define PITHOS_UI
+%define OS_SUBTITLE "LFM3-1.7B ",0xc2,0xb7," Q4_K_M"
+%define CHAT_STYLE
+%define CHAT_USER_LABEL 10,27,"[33m",0xe2,0x80,0xba,27,"[1m "
+%define CHAT_ASSISTANT_LABEL 27,"[0m"
 %define OS_BANNER "Pithos CORE x86-64 | LFM3-1.7B Q4_K_M"
 %define AP_FEATURES 0x38001000      ; the AVX2 kernels also need F16C on every core
 %include "os/platform.asm"
@@ -47,6 +55,7 @@ generate_prompt:
     mov dword [generated_tokens],0
     mov dword [decode_length],0
     mov byte [decode_final],0
+    call engine_turn_start
     xor r13d,r13d
 %ifndef DUMP_LAYERS                 ; the diagnostic dumps follow token order
 .block:
@@ -96,28 +105,20 @@ generate_prompt:
     call write_all
     ret
 %endif
-    xor eax,eax
-    mov ecx,1
-    movss xmm0,[logits]
-.argmax:
-    movss xmm1,[logits+rcx*4]
-    ucomiss xmm1,xmm0
-    jbe .next
-    movaps xmm0,xmm1
-    mov eax,ecx
-.next:
-    inc ecx
-    cmp ecx,128000
-    jb .argmax
+    call choose_token
     mov [next_token],eax
     cmp byte [text_mode],0
     jne .emit_text
     call print_id
     jmp .emitted
 .emit_text:
-    call decode_token
+    call engine_emit
 .emitted:
     inc dword [generated_tokens]
+    mov eax,[next_token]
+    call engine_progress
+    test eax,eax
+    jnz .finished               ; stopped with Escape
     mov eax,[generated_tokens]
     cmp eax,[max_new_tokens]
     jae .finished
@@ -132,7 +133,7 @@ generate_prompt:
     mov byte [decode_final],1
     call decode_pending
 .done:
-    ret
+    jmp engine_turn_end
 
 ; Consume one token: its Q6_K embedding row, then every layer.
 consume_token:
@@ -495,6 +496,7 @@ block_residual:
     ret
 
 %include "lfm3/kernels.asm"
+%include "lfm3/engine.asm"
 %include "expmath.asm"
 %ifdef BARE_METAL
 %include "os/smp.asm"

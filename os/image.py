@@ -15,11 +15,14 @@ def main():
     parser.add_argument("output", type=Path)
     parser.add_argument("--options", default="mode=chat tokens=64 context=2048 threads=6")
     parser.add_argument("--title", default="LFM2.5 BF16", help="GRUB menu entry")
+    parser.add_argument("--license", type=Path, action="append", default=[],
+                        help="additional license file copied next to the kernel")
     args = parser.parse_args()
     if not re.fullmatch(r"[A-Za-z0-9 ._()+-]+", args.title):
         parser.error("The title may contain letters, digits, spaces and ._()+-")
-    if not re.fullmatch(r"(?:mode=(?:chat|ids|text)|(?:tokens|context|threads)=[0-9]+)(?: (?:mode=(?:chat|ids|text)|(?:tokens|context|threads)=[0-9]+))*", args.options):
-        parser.error("Options must contain only mode, tokens, context and threads assignments")
+    option = r"(?:mode=(?:chat|ids|text)|(?:tokens|context|threads)=[0-9]+|keymap=[a-z]{2})"
+    if not re.fullmatch(rf"{option}(?: {option})*", args.options):
+        parser.error("Options must contain only mode, tokens, context, threads and keymap assignments")
     options = dict(part.split("=", 1) for part in args.options.split())
     if not 1 <= int(options.get("tokens", 32)) <= int(options.get("context", 2048)) <= 32768:
         parser.error("Require 1 <= tokens <= context <= 32768")
@@ -38,8 +41,10 @@ def main():
         root = directory / "root"
         boot = root / "boot"
         (boot / "grub").mkdir(parents=True)
-        for source, name in ((args.kernel, "lfm-os.elf"), (args.bundle, "lfm-boot.bundle"),
-                             (Path("os/FONT-LICENSE.txt"), "FONT-LICENSE.txt")):
+        files = [(args.kernel, "lfm-os.elf"), (args.bundle, "lfm-boot.bundle"),
+                 (Path("os/FONT-LICENSE.txt"), "FONT-LICENSE.txt")]
+        files += [(path, path.name) for path in args.license]
+        for source, name in files:
             try:
                 os.link(source, boot / name)
             except OSError:

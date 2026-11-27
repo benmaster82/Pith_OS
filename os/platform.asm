@@ -189,6 +189,12 @@ os_options:
     call os_prefix
     test eax,eax
     jnz .threads
+%ifdef PITHOS_UI
+    mov edi,os_keymap_key
+    call os_prefix
+    test eax,eax
+    jnz .keymap
+%endif
     ; QEMU prefixes the kernel filename. Only that first positional word is allowed.
     cmp byte [os_seen_option],0
     jne fail
@@ -251,6 +257,15 @@ os_options:
     jz fail
     mov [requested_threads],eax
     jmp .next
+%ifdef PITHOS_UI
+.keymap:
+    mov byte [os_seen_option],1
+    mov esi,os_option+7
+    call keyboard_select
+    test eax,eax
+    jz fail
+    jmp .next
+%endif
 .prompt:
     add r12,7
     mov [os_prompt],r12
@@ -521,6 +536,9 @@ os_mode_key: db "mode=",0
 os_tokens_key: db "tokens=",0
 os_context_key: db "context=",0
 os_threads_key: db "threads=",0
+%ifdef PITHOS_UI
+os_keymap_key: db "keymap=",0
+%endif
 os_ids_value: db "ids",0
 os_text_value: db "text",0
 os_chat_value: db "chat",0
@@ -539,4 +557,8 @@ arena_end: resq 1
 mmap_end: resq 1
 section .text
 %include "os/multiboot.asm"
+%ifdef PITHOS_UI
+%include "os/ui.asm"
+%else
 %include "os/console.asm"
+%endif
