@@ -73,9 +73,9 @@ os: build/lfm-os.elf $(OS_BUNDLE)
 os-image: $(OS_IMAGE)
 
 OS_KEYMAP ?= us
-$(OS_IMAGE): build/lfm-os.elf $(OS_BUNDLE) os/image.py os/FONT-LICENSE.txt os/CONSOLE-FONTS-LICENSE.txt
+$(OS_IMAGE): build/lfm-os.elf $(OS_BUNDLE) os/image.py os/FONT-LICENSE.txt os/CONSOLE-FONTS-LICENSE.txt os/KEYMAPS-LICENSE.txt LICENSE
 	$(PYTHON) os/image.py build/lfm-os.elf "$(OS_BUNDLE)" "$(OS_IMAGE)" --title "Pithos CORE LFM2.5-350M" \
-		--license os/CONSOLE-FONTS-LICENSE.txt \
+		--license os/CONSOLE-FONTS-LICENSE.txt --license os/KEYMAPS-LICENSE.txt --license LICENSE \
 		--options "mode=chat tokens=64 context=2048 threads=6 keymap=$(OS_KEYMAP)"
 
 os-run: os
@@ -206,9 +206,9 @@ build/lfm3/%.elf: build/lfm3/%.elf64
 	objcopy -O elf32-i386 $< $@
 
 LFM3_KEYMAP ?= $(OS_KEYMAP)
-$(LFM3_OS_IMAGE): build/lfm3/lfm3-os.elf $(LFM3_BUNDLE) os/image.py os/FONT-LICENSE.txt os/CONSOLE-FONTS-LICENSE.txt
+$(LFM3_OS_IMAGE): build/lfm3/lfm3-os.elf $(LFM3_BUNDLE) os/image.py os/FONT-LICENSE.txt os/CONSOLE-FONTS-LICENSE.txt os/KEYMAPS-LICENSE.txt LICENSE
 	$(PYTHON) os/image.py build/lfm3/lfm3-os.elf "$(LFM3_BUNDLE)" "$(LFM3_OS_IMAGE)" --title "Pithos CORE" \
-		--license os/CONSOLE-FONTS-LICENSE.txt \
+		--license os/CONSOLE-FONTS-LICENSE.txt --license os/KEYMAPS-LICENSE.txt --license LICENSE \
 		--options "mode=chat tokens=256 context=4096 threads=6 keymap=$(LFM3_KEYMAP)"
 
 verify-lfm3-os: lfm3-os build/lfm3/lfm3-os-logits.elf build/lfm3/lfm3-next build/lfm3/lfm3-logits

@@ -16,6 +16,7 @@
   <img alt="AVX2 e FMA, fino a 16 CPU" src="https://img.shields.io/badge/SIMD-AVX2%20%7C%20FMA%2C%20up%20to%2016%20CPUs-14b8a6">
   <a href="#console-e-comandi"><img alt="Console con Unicode, emoji a colori e 13 layout di tastiera" src="https://img.shields.io/badge/console-Unicode%2C%20colour%20emoji%2C%2013%20layouts-6b7280"></a>
   <a href="#verifica"><img alt="Verificato contro Transformers" src="https://img.shields.io/badge/verified-against%20Transformers-2ea043"></a>
+  <a href="LICENSE"><img alt="Licenza MIT" src="https://img.shields.io/badge/license-MIT-2ea043"></a>
   <img alt="Ultimo commit" src="https://img.shields.io/github/last-commit/benmaster82/Pith_OS?color=3b82f6">
 </p>
 
@@ -405,3 +406,9 @@ Benchmark del 26 novembre 2026 sulla stessa CPU, pesi BF16 nel filesystem Linux,
 Il benchmark osserva i token su stdout. Il tempo al primo token include l'avvio del processo e il prefill. La velocita successiva e calcolata sui 63 intervalli dopo il primo token. I campioni completi sono salvati in `build/generation-benchmark.json`.
 
 [Checkpoint e configurazione ufficiali](https://huggingface.co/LiquidAI/LFM2.5-350M/tree/main)
+
+## Licenza
+
+Pithos CORE e distribuito con [licenza MIT](LICENSE). I glifi della console provengono da DejaVu Sans Mono ([os/FONT-LICENSE.txt](os/FONT-LICENSE.txt)) e da GNU Unifont e Noto Color Emoji, entrambi usati con la SIL Open Font License 1.1 ([os/CONSOLE-FONTS-LICENSE.txt](os/CONSOLE-FONTS-LICENSE.txt)). I layout di tastiera sono generati dai dati xkeyboard-config ([os/KEYMAPS-LICENSE.txt](os/KEYMAPS-LICENSE.txt)). Il marchio di Pithos proviene dal progetto [pithos](https://github.com/benmaster82/Pithos) dello stesso autore.
+
+I pesi dei modelli non fanno parte di questo repository. LFM3-1.7B e LFM2.5-350M sono distribuiti da Liquid AI con le proprie licenze (il GGUF di LFM3 dichiara la LFM Open License, `lfm1.0`), che valgono anche per i bundle di avvio e le immagini ISO costruite con essi.
