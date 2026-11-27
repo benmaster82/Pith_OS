@@ -24,6 +24,7 @@
   <a href="#build-and-usage">Quick start</a> ·
   <a href="#pithos-core-in-qemu-from-cd-or-usb">Boot from CD or USB</a> ·
   <a href="#console-and-commands">Console</a> ·
+  <a href="#keyboard-layouts">Keyboard layouts</a> ·
   <a href="#performance">Performance</a> ·
   <a href="lfm3/README.md">LFM3 internals</a> ·
   <a href="README.it.md">Italiano</a>
@@ -60,6 +61,28 @@ python3 os/run.py --iso build/lfm3/pithos-core.iso --uefi --usb --cpus 4 --displ
 ~~~
 
 `build/lfm3/pithos-core.iso`, about 1.13 GB, is a hybrid GRUB image for BIOS and UEFI that can be written raw to a USB stick. It holds the kernel, the unchanged GGUF and the tokenizer tables; after boot the kernel works entirely in RAM. The image opens the chat with 256 tokens per answer, a 4,096-position context and up to six CPUs; `OS_KEYMAP` sets the default keyboard layout. It needs 2 GiB of RAM below 4 GiB and a CPU with AVX2, FMA and F16C; Secure Boot must be disabled.
+
+### Keyboard layouts
+
+Pithos CORE has thirteen keyboard layouts generated from the XKB data, with Shift, AltGr, Caps Lock and dead keys:
+
+| Code | Layout | Code | Layout | Code | Layout |
+| --- | --- | --- | --- | --- | --- |
+| `us` | US English (default) | `es` | Spanish | `se` | Swedish |
+| `uk` | UK English | `pt` | Portuguese | `fi` | Finnish |
+| `it` | Italian | `br` | Brazilian ABNT2 | `no` | Norwegian |
+| `de` | German | `ch` | Swiss German | `dk` | Danish |
+| `fr` | French AZERTY | | | | |
+
+The layout the image starts with is chosen when it is built, through `OS_KEYMAP`; the same variable applies to both models:
+
+~~~sh
+make lfm3-os-image LFM3_MODEL=weights/LFM3-1.7B-Q4_K_M.gguf LFM3_TOKENIZER=lfm3-ref/tokenizer.json OS_KEYMAP=it
+make lfm3-os-image LFM3_MODEL=weights/LFM3-1.7B-Q4_K_M.gguf LFM3_TOKENIZER=lfm3-ref/tokenizer.json OS_KEYMAP=de
+make os-image MODEL=weights/model.safetensors OS_KEYMAP=fr
+~~~
+
+With `os/image.py` the layout is a kernel option, for example `--options "mode=chat tokens=256 context=4096 threads=6 keymap=es"`. Once booted, `/keymap uk` switches the layout during the chat without restarting; the current layout is shown at the end of the status line. Rebuilding with a different `OS_KEYMAP` only regenerates the ISO, not the kernel or the bundle.
 
 ### Console and commands
 

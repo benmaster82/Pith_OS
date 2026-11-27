@@ -73,7 +73,11 @@ os: build/lfm-os.elf $(OS_BUNDLE)
 os-image: $(OS_IMAGE)
 
 OS_KEYMAP ?= us
-$(OS_IMAGE): build/lfm-os.elf $(OS_BUNDLE) os/image.py os/FONT-LICENSE.txt os/CONSOLE-FONTS-LICENSE.txt os/KEYMAPS-LICENSE.txt LICENSE
+# The keymap is an option baked into the ISO: a stamp rewritten only when it changes rebuilds the image.
+$(OS_IMAGE).keymap: FORCE
+	@mkdir -p $(dir $@)
+	@echo '$(OS_KEYMAP)' | cmp -s - $@ || echo '$(OS_KEYMAP)' > $@
+$(OS_IMAGE): build/lfm-os.elf $(OS_BUNDLE) $(OS_IMAGE).keymap os/image.py os/FONT-LICENSE.txt os/CONSOLE-FONTS-LICENSE.txt os/KEYMAPS-LICENSE.txt LICENSE
 	$(PYTHON) os/image.py build/lfm-os.elf "$(OS_BUNDLE)" "$(OS_IMAGE)" --title "Pithos CORE LFM2.5-350M" \
 		--license os/CONSOLE-FONTS-LICENSE.txt --license os/KEYMAPS-LICENSE.txt --license LICENSE \
 		--options "mode=chat tokens=64 context=2048 threads=6 keymap=$(OS_KEYMAP)"
@@ -206,7 +210,10 @@ build/lfm3/%.elf: build/lfm3/%.elf64
 	objcopy -O elf32-i386 $< $@
 
 LFM3_KEYMAP ?= $(OS_KEYMAP)
-$(LFM3_OS_IMAGE): build/lfm3/lfm3-os.elf $(LFM3_BUNDLE) os/image.py os/FONT-LICENSE.txt os/CONSOLE-FONTS-LICENSE.txt os/KEYMAPS-LICENSE.txt LICENSE
+$(LFM3_OS_IMAGE).keymap: FORCE
+	@mkdir -p $(dir $@)
+	@echo '$(LFM3_KEYMAP)' | cmp -s - $@ || echo '$(LFM3_KEYMAP)' > $@
+$(LFM3_OS_IMAGE): build/lfm3/lfm3-os.elf $(LFM3_BUNDLE) $(LFM3_OS_IMAGE).keymap os/image.py os/FONT-LICENSE.txt os/CONSOLE-FONTS-LICENSE.txt os/KEYMAPS-LICENSE.txt LICENSE
 	$(PYTHON) os/image.py build/lfm3/lfm3-os.elf "$(LFM3_BUNDLE)" "$(LFM3_OS_IMAGE)" --title "Pithos CORE" \
 		--license os/CONSOLE-FONTS-LICENSE.txt --license os/KEYMAPS-LICENSE.txt --license LICENSE \
 		--options "mode=chat tokens=256 context=4096 threads=6 keymap=$(LFM3_KEYMAP)"

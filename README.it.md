@@ -24,6 +24,7 @@
   <a href="#build-e-utilizzo">Avvio rapido</a> ·
   <a href="#pithos-core-in-qemu-da-cd-o-da-usb">Avvio da CD o USB</a> ·
   <a href="#console-e-comandi">Console</a> ·
+  <a href="#layout-di-tastiera">Tastiere</a> ·
   <a href="#prestazioni">Prestazioni</a> ·
   <a href="lfm3/README.it.md">Dettagli di LFM3</a> ·
   <a href="README.md">English</a>
@@ -60,6 +61,28 @@ python3 os/run.py --iso build/lfm3/pithos-core.iso --uefi --usb --cpus 4 --displ
 ~~~
 
 `build/lfm3/pithos-core.iso`, circa 1,13 GB, e un'immagine ibrida GRUB per BIOS e UEFI, scrivibile come immagine raw su una chiavetta. Contiene kernel, GGUF invariato e tabelle del tokenizer; dopo l'avvio il kernel lavora interamente in RAM. L'immagine apre la chat con 256 token per risposta, contesto 4.096 e fino a sei CPU; `OS_KEYMAP` sceglie il layout di tastiera predefinito. Servono 2 GiB di RAM sotto i 4 GiB e una CPU con AVX2, FMA e F16C; Secure Boot va disattivato.
+
+### Layout di tastiera
+
+Pithos CORE ha tredici layout di tastiera generati dai dati XKB, con Shift, AltGr, Caps Lock e tasti morti:
+
+| Codice | Layout | Codice | Layout | Codice | Layout |
+| --- | --- | --- | --- | --- | --- |
+| `us` | inglese USA (predefinito) | `es` | spagnolo | `se` | svedese |
+| `uk` | inglese UK | `pt` | portoghese | `fi` | finlandese |
+| `it` | italiano | `br` | brasiliano ABNT2 | `no` | norvegese |
+| `de` | tedesco | `ch` | svizzero tedesco | `dk` | danese |
+| `fr` | francese AZERTY | | | | |
+
+Il layout con cui parte l'immagine si sceglie alla costruzione con `OS_KEYMAP`; la stessa variabile vale per entrambi i modelli:
+
+~~~sh
+make lfm3-os-image LFM3_MODEL=weights/LFM3-1.7B-Q4_K_M.gguf LFM3_TOKENIZER=lfm3-ref/tokenizer.json OS_KEYMAP=it
+make lfm3-os-image LFM3_MODEL=weights/LFM3-1.7B-Q4_K_M.gguf LFM3_TOKENIZER=lfm3-ref/tokenizer.json OS_KEYMAP=de
+make os-image MODEL=weights/model.safetensors OS_KEYMAP=fr
+~~~
+
+Con `os/image.py` il layout e un'opzione del kernel, ad esempio `--options "mode=chat tokens=256 context=4096 threads=6 keymap=es"`. Dopo l'avvio, `/keymap uk` cambia layout durante la chat senza riavviare; il layout attivo compare in fondo alla riga di stato. Ricostruire con un altro `OS_KEYMAP` rigenera solo l'ISO, non il kernel o il bundle.
 
 ### Console e comandi
 
