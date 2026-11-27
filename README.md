@@ -1,163 +1,173 @@
 # Pithos CORE
 
-Inferenza di modelli LiquidAI in NASM x86-64, su Linux e come sistema operativo autonomo.
+LiquidAI language models in x86-64 NASM, on Linux and as a standalone operating system.
 
-Pithos CORE esegue LiquidAI LFM3-1.7B, il modello principale, dal GGUF Q4_K_M, e LFM2.5-350M, il modello compatto, dai pesi BF16 ufficiali. Ogni modello ha un eseguibile Linux e un kernel autonomo con avvio BIOS/UEFI da CD o chiavetta USB, fino a 16 CPU, console grafica Unicode e porta seriale. Tokenizer BPE, prodotti AVX2/FMA, worker paralleli, prefill a blocchi, campionamento e comandi della chat sono condivisi. Il runtime non richiede libc o Python. Progetto indipendente, ispirato a llm.asm, non un fork.
+[Italiano](README.it.md)
 
-## LFM3-1.7B: il modello principale
+![Pithos CORE running LFM3-1.7B: chat with Chinese, Japanese, Korean and colour emoji](docs/screenshots/pithos-core-chat.png)
 
-Il runtime quantizza ogni ingresso di matrice in Q8_K e calcola prodotti interi con le righe Q4_K e Q6_K del GGUF, come ggml. Gestisce sandwich norm, convoluzioni a sette coefficienti, attenzione con finestra di 256 posizioni, RoPE parziale e gate per testa. Le risposte coincidono con un riferimento FP32 costruito sul codice ufficiale `modeling_lfm3.py`; i dettagli sono in [lfm3/README.md](lfm3/README.md).
+Pithos CORE runs LiquidAI LFM3-1.7B, the main model, from its Q4_K_M GGUF, and LFM2.5-350M, the compact model, from its official BF16 weights. Each model has a Linux executable and a standalone kernel that boots from BIOS or UEFI, from CD or a USB stick, uses up to 16 CPUs and offers a Unicode graphical console and a serial port. The BPE tokenizer, AVX2/FMA kernels, parallel workers, block prefill, sampling and chat commands are shared. The runtime needs neither libc nor Python. An independent project, inspired by llm.asm, not a fork.
 
-### Build e utilizzo
+## LFM3-1.7B: the main model
 
-Servono NASM, GNU ld, GNU make 4.3 o successivo e Python 3 con il pacchetto tokenizers. Il GGUF e i file del tokenizer ufficiale si scaricano da Hugging Face.
+The runtime quantizes every matrix input to Q8_K and computes integer products with the Q4_K and Q6_K rows of the GGUF, as ggml does. It implements the sandwich norm, seven-tap short convolutions, attention with a 256-position sliding window, partial RoPE and per-head output gates. Its answers match an FP32 reference built on the official `modeling_lfm3.py`; the details are in [lfm3/README.md](lfm3/README.md).
+
+### Build and usage
+
+The build needs NASM, GNU ld, GNU make 4.3 or later and Python 3 with the tokenizers package. The GGUF and the official tokenizer files come from Hugging Face.
 
 ~~~sh
 hf download LiquidAI/LFM3-1.7B-GGUF LFM3-1.7B-Q4_K_M.gguf --local-dir weights
 hf download LiquidAI/LFM3-1.7B tokenizer.json tokenizer_config.json chat_template.jinja --local-dir lfm3-ref
 make lfm3 LFM3_MODEL=weights/LFM3-1.7B-Q4_K_M.gguf LFM3_TOKENIZER=lfm3-ref/tokenizer.json
 ./build/lfm3/lfm3-next weights/LFM3-1.7B-Q4_K_M.gguf --chat 256
-./build/lfm3/lfm3-next weights/LFM3-1.7B-Q4_K_M.gguf --text 128 "Scrivi due frasi su Torino."
+./build/lfm3/lfm3-next weights/LFM3-1.7B-Q4_K_M.gguf --text 128 "Write two sentences about Turin."
 ~~~
 
-Le opzioni sono `--chat [N]`, `--text N "prompt"`, `--generate N ID ...`, `--encode` e `--decode`; `LFM_THREADS` sceglie da 1 a 16 thread e `LFM_CONTEXT` da 1 a 32.768 posizioni. Le tabelle `build/lfm3/tokenizer.bin` devono restare accanto all'eseguibile.
+The options are `--chat [N]`, `--text N "prompt"`, `--generate N ID ...`, `--encode` and `--decode`; `LFM_THREADS` selects 1 to 16 threads and `LFM_CONTEXT` 1 to 32,768 positions. The `build/lfm3/tokenizer.bin` tables must stay next to the executable.
 
-### Pithos CORE in QEMU, da CD o da USB
+### Pithos CORE in QEMU, from CD or USB
 
 ~~~sh
-make lfm3-os-image LFM3_MODEL=weights/LFM3-1.7B-Q4_K_M.gguf LFM3_TOKENIZER=lfm3-ref/tokenizer.json OS_KEYMAP=it
+make lfm3-os-image LFM3_MODEL=weights/LFM3-1.7B-Q4_K_M.gguf LFM3_TOKENIZER=lfm3-ref/tokenizer.json OS_KEYMAP=us
 python3 os/run.py --iso build/lfm3/pithos-core.iso --cpus 4 --display gtk
 python3 os/run.py --iso build/lfm3/pithos-core.iso --uefi --usb --cpus 4 --display gtk
 ~~~
 
-`build/lfm3/pithos-core.iso`, circa 1,13 GB, e un'immagine ibrida GRUB per BIOS e UEFI, scrivibile come immagine raw su una chiavetta. Contiene kernel, GGUF invariato e tabelle del tokenizer; dopo l'avvio il kernel lavora interamente in RAM. L'immagine apre la chat con 256 token per risposta, contesto 4.096 e fino a sei CPU; `OS_KEYMAP` sceglie il layout di tastiera predefinito. Servono 2 GiB di RAM sotto i 4 GiB e una CPU con AVX2, FMA e F16C; Secure Boot va disattivato.
+`build/lfm3/pithos-core.iso`, about 1.13 GB, is a hybrid GRUB image for BIOS and UEFI that can be written raw to a USB stick. It holds the kernel, the unchanged GGUF and the tokenizer tables; after boot the kernel works entirely in RAM. The image opens the chat with 256 tokens per answer, a 4,096-position context and up to six CPUs; `OS_KEYMAP` sets the default keyboard layout. It needs 2 GiB of RAM below 4 GiB and a CPU with AVX2, FMA and F16C; Secure Boot must be disabled.
 
-### Console e comandi
+### Console and commands
 
-La console mostra il marchio di Pithos, il modello, la conversazione con a capo per parola e una barra di stato con velocita di generazione e del prompt, tempo del primo token, contesto, decodifica, ragionamento, processori e layout. Cinese, giapponese, coreano ed emoji a colori sono visibili sullo schermo; la tastiera segue tredici layout (us, uk, it, de, fr, es, pt, br, ch, se, fi, no, dk) con AltGr, Caps Lock e tasti morti.
+The console shows the Pithos mark, the model, the conversation with word wrapping, and a status line with generation and prompt speed, time to first token, context, decoding, reasoning, cores and keyboard layout. Chinese, Japanese, Korean and colour emoji appear on screen; the keyboard follows thirteen layouts (us, uk, it, de, fr, es, pt, br, ch, se, fi, no, dk) with AltGr, Caps Lock and dead keys.
 
-| Comando | Effetto |
+| Command | Effect |
 | --- | --- |
-| `/set temp 0.7` | campionamento con temperatura; 0 e la decodifica greedy predefinita |
-| `/set top-k 50`, `top-p 0.95`, `min-p 0.05`, `repeat 1.1`, `seed 42`, `tokens 256` | filtri, penalita di ripetizione, seme e token per risposta |
-| `/think on`, `/think off`, `/think show`, `/think hide` | ragionamento prima della risposta, visibile o riassunto |
-| `/system TESTO` | system prompt; riavvia la conversazione |
-| `/stats`, `/set`, `/reset`, `/help`, `/clear`, `/quit` | statistiche, impostazioni, valori predefiniti, aiuto, nuova conversazione, uscita |
-| `/keymap it`, Esc | layout di tastiera; Esc cancella la riga o interrompe la risposta (solo nel kernel) |
+| `/set temp 0.7` | sampling with a temperature; 0 is the default greedy decoding |
+| `/set top-k 50`, `top-p 0.95`, `min-p 0.05`, `repeat 1.1`, `seed 42`, `tokens 256` | candidate filters, repetition penalty, seed and tokens per answer |
+| `/think on`, `/think off`, `/think show`, `/think hide` | reasoning before the answer, shown dim or summarised |
+| `/system TEXT` | system prompt; restarts the conversation |
+| `/stats`, `/set`, `/reset`, `/help`, `/clear`, `/quit` | statistics, settings, defaults, help, new conversation, exit |
+| `/keymap it`, Esc | keyboard layout; Esc clears the line or stops the answer (kernel only) |
 
-### Prestazioni
+![Sampling settings, an answer and the command list, with live statistics in the status line](docs/screenshots/pithos-core-commands.png)
 
-Misure del 27 novembre 2026 su Intel Core i5-10500H, WSL2 con quattro CPU visibili, prompt di 465 token e 64 token generati.
+![Reasoning mode: the model's reasoning appears dim before the answer](docs/screenshots/pithos-core-reasoning.png)
 
-| Thread | Primo token | Prompt | Generazione |
+### Performance
+
+Measured on 27 November 2026 on an Intel Core i5-10500H, WSL2 with four visible CPUs, a 465-token prompt and 64 generated tokens.
+
+| Threads | First token | Prompt | Generation |
 | --- | --- | --- | --- |
-| 1 | 19,67 s | 24 token/s | 9,79 token/s |
-| 4 | 7,95 s | 59 token/s | 17,77 token/s |
+| 1 | 19.67 s | 24 tokens/s | 9.79 tokens/s |
+| 4 | 7.95 s | 59 tokens/s | 17.77 tokens/s |
 
-Sulla stessa macchina il motore C pithos, con quattro thread su Windows, ha elaborato lo stesso prompt a 56-62 token/s e generato a 19-21 token/s.
+On the same machine the pithos C engine, with four threads on Windows, processed the same prompt at 56-62 tokens/s and generated 19-21 tokens/s.
 
-### Verifica
+### Verification
 
 ~~~sh
 make verify-lfm3 verify-lfm3-tokenizer verify-lfm3-os LFM3_MODEL=weights/LFM3-1.7B-Q4_K_M.gguf LFM3_TOKENIZER=lfm3-ref/tokenizer.json LFM3_REF=lfm3-ref
 ~~~
 
-Il tokenizer coincide con quello ufficiale su 62 testi e su tutti i 128.000 ID. Ogni blocco del modello riproduce il riferimento FP32 con gli stessi ingressi Q8_K, l'argmax finale coincide su prompt fino a 721 token e le risposte greedy sono l'argmax del riferimento salvo quasi pareggi. Logit e risposte sono identici bit per bit fra 1 e 16 thread, fra prefill a blocchi e token per token, e fra Linux e kernel con 1, 2, 3, 4 e 6 processori.
+The tokenizer matches the official one on 62 texts and on all 128,000 IDs. Every block of the model reproduces the FP32 reference given the same Q8_K inputs, the final argmax matches on prompts of up to 721 tokens, and greedy answers are the reference argmax except at near ties. Logits and answers are bitwise identical between 1 and 16 threads, between block and token-by-token prefill, and between Linux and the kernel on 1, 2, 3, 4 and 6 cores.
 
-## LFM2.5-350M: il modello compatto
+## LFM2.5-350M: the compact model
 
-Inferenza per i pesi BF16 ufficiali di LiquidAI/LFM2.5-350M, con attivazioni e accumulazioni FP32, un percorso scalare per le CPU senza AVX2 e verifiche bit per bit contro Transformers. Linux carica i pesi con mmap e usa thread persistenti; il kernel riceve pesi e tokenizer dal bootloader e avvia i propri worker, con la stessa console di Pithos CORE.
+![Pithos CORE running LFM2.5-350M](docs/screenshots/pithos-core-lfm2.png)
 
-### Build e utilizzo
+Inference for the official BF16 weights of LiquidAI/LFM2.5-350M, with FP32 activations and accumulation, a scalar path for CPUs without AVX2, and bitwise verification against Transformers. Linux loads the weights with mmap and uses persistent threads; the kernel receives weights and tokenizer from the bootloader and starts its own workers, with the same Pithos CORE console.
 
-Servono NASM, GNU ld, GNU make 4.3 o successivo e Python 3 con il pacchetto tokenizers per la build. La versione verificata di tokenizers e 0.23.3. Su Linux x86-64, con il client Hugging Face installato, dalla directory dei sorgenti si esegue
+### Build and usage
+
+The build needs NASM, GNU ld, GNU make 4.3 or later and Python 3 with the tokenizers package; the verified tokenizers version is 0.23.3. On x86-64 Linux with the Hugging Face client installed, run from the source directory
 
 ~~~sh
 hf download LiquidAI/LFM2.5-350M --revision 9921cd4d82c0e3986887aa4b376f9446729ef8a3 --include model.safetensors config.json tokenizer.json tokenizer_config.json chat_template.jinja --local-dir weights
 make MODEL=weights/model.safetensors
 ./build/lfm-next weights/model.safetensors 1 314 271
-./build/lfm-next weights/model.safetensors --text 64 "Scrivi un saluto in italiano."
+./build/lfm-next weights/model.safetensors --text 64 "Write a greeting in Italian."
 ./build/lfm-next weights/model.safetensors --chat
 ~~~
 
-Il generatore Python controlla forme e tipi dei tensori e produce gli offset del checkpoint. Un secondo generatore compila il tokenizer ufficiale in `build/tokenizer.bin`, con vocabolario, merge BPE, token aggiunti e categorie Unicode ricavate dal medesimo motore del riferimento. Le tabelle occupano 4.224.959 byte e devono essere distribuite accanto all'eseguibile. Il runtime le trova tramite `/proc/self/exe` e ne verifica dimensione e checksum. Python serve durante la build e le verifiche. Per scegliere l'interprete passare `PYTHON=/percorso/venv/bin/python` a make.
+A Python generator checks tensor shapes and types and emits the checkpoint offsets. A second generator compiles the official tokenizer into `build/tokenizer.bin`, with the vocabulary, BPE merges, added tokens and Unicode categories taken from the same engine as the reference. The tables take 4,224,959 bytes and must ship next to the executable. The runtime finds them through `/proc/self/exe` and checks their size and checksum. Python is needed only for the build and the verifications. To choose the interpreter, pass `PYTHON=/path/to/venv/bin/python` to make.
 
-La modalita `--text N "prompt"` applica il template ufficiale per un messaggio utente e il prefisso assistant, genera fino a N token e scrive la risposta UTF-8 in streaming. I token marcati speciali vengono omessi dal testo. La decodifica conserva le sequenze UTF-8 spezzate tra token e sostituisce quelle malformate con U+FFFD. La risposta termina senza aggiungere caratteri al testo generato. Ogni invocazione avvia una conversazione di un turno. Il testo con il template deve occupare al massimo 8.191 byte e rispettare il limite della cache.
+`--text N "prompt"` applies the official template for one user message and the assistant prefix, generates up to N tokens and streams the UTF-8 answer. Tokens marked special are left out of the text. Decoding keeps UTF-8 sequences split across tokens and replaces malformed ones with U+FFFD. The answer ends without adding characters to the generated text. Each invocation starts a one-turn conversation. The templated text may take at most 8,191 bytes and must fit the cache.
 
-Per usare la build presente da PowerShell nella directory del repository
+To use the current build from PowerShell in the repository directory:
 
 ~~~powershell
-wsl -d Ubuntu -- ./build/lfm-next /opt/lfm-model/model.safetensors --text 64 "Scrivi un saluto in italiano."
+wsl -d Ubuntu -- ./build/lfm-next /opt/lfm-model/model.safetensors --text 64 "Write a greeting in Italian."
 ~~~
 
-La modalita `--chat [N]` mantiene il modello, i worker e la cronologia in memoria tra i turni. N limita i token generati per risposta e vale 128 per impostazione predefinita, ridotto alla dimensione del contesto se necessario. Inserire una domanda per riga, `/clear` per azzerare la conversazione e `/quit` oppure EOF per uscire. Le risposte sono emesse su stdout, mentre etichette e messaggi di stato usano stderr.
+`--chat [N]` keeps the model, the workers and the history in memory between turns. N limits the tokens generated per answer and defaults to 128, reduced to the context size if needed. Enter one question per line, `/clear` to reset the conversation and `/quit` or EOF to exit. Answers go to stdout, while labels and status messages use stderr.
 
 ~~~powershell
 wsl -d Ubuntu -- ./build/lfm-next /opt/lfm-model/model.safetensors --chat
 wsl -d Ubuntu -- env LFM_CONTEXT=4096 LFM_THREADS=6 ./build/lfm-next /opt/lfm-model/model.safetensors --chat 128
 ~~~
 
-La variabile `LFM_CONTEXT` accetta valori da 1 a 32.768. Il valore predefinito e 2.048 in chat e 512 nelle altre modalita. La cache KV FP32 viene allocata dinamicamente e riserva 24 KiB per posizione, quindi 48 MiB a 2.048 posizioni e 768 MiB a 32.768. Pesi e buffer di lavoro occupano memoria aggiuntiva. I limiti del testo UTF-8 restano 8.191 byte per richiesta, template incluso.
+`LFM_CONTEXT` accepts 1 to 32,768. The default is 2,048 in chat and 512 in the other modes. The FP32 KV cache is allocated dynamically and takes 24 KiB per position, so 48 MiB at 2,048 positions and 768 MiB at 32,768. Weights and work buffers take additional memory. UTF-8 text stays limited to 8,191 bytes per request, template included.
 
-Prima di accettare un turno, la chat verifica lo spazio necessario per il nuovo prompt, N token di risposta e due posizioni per chiudere il turno. Quando lo spazio e insufficiente, mostra un messaggio e attende un'altra riga. `/clear` azzera la posizione e lo stato delle convoluzioni. I nuovi token sovrascrivono le righe KV prima di leggerle.
+Before accepting a turn, the chat checks the space needed for the new prompt, N answer tokens and two positions to close the turn. When there is not enough, it prints a message and waits for another line. `/clear` resets the position and the convolution state. New tokens overwrite KV rows before they are read.
 
-La cronologia conserva gli ID realmente generati. Ogni risposta viene terminata con EOS e una nuova riga secondo il template. Se la generazione raggiunge N prima di EOS, il programma segnala il limite e aggiunge alla cronologia i token di chiusura. Input malformati o eccessivamente lunghi vengono rifiutati prima di modificare lo stato del modello.
+The history keeps the IDs actually generated. Each answer ends with EOS and a newline, as in the template. If generation reaches N before EOS, the program reports the limit and adds the closing tokens to the history. Malformed or overlong input is rejected before the model state changes.
 
-Il numero di thread predefinito e il minore tra sei e il numero di CPU disponibili nell'affinita del processo. La variabile `LFM_THREADS` permette di scegliere da 1 a 16 thread, incluso il thread principale. Se il sistema limita la creazione dei worker, il programma usa quelli creati con successo.
+The default thread count is the smaller of six and the CPUs available in the process affinity. `LFM_THREADS` selects 1 to 16 threads, the main thread included. If the system limits worker creation, the program uses the workers that were created.
 
 ~~~sh
 LFM_THREADS=4 ./build/lfm-next weights/model.safetensors 1 314 271
 ~~~
 
-L'opzione `--generate N`, dopo il checkpoint e prima degli ID, genera fino a N token. Il valore predefinito e uno, compatibile con la CLI iniziale. La generazione termina quando raggiunge N oppure emette il token EOS 7, incluso nell'output. N deve essere positivo e la somma tra lunghezza del prompt e N meno uno deve rientrare nel contesto configurato. L'ultimo token previsto viene emesso senza richiedere una nuova posizione in cache. Tutti gli argomenti sono verificati prima dell'inferenza.
+`--generate N`, after the checkpoint and before the IDs, generates up to N tokens. The default is one, compatible with the original CLI. Generation stops at N tokens or at EOS token 7, which is included in the output. N must be positive, and the prompt length plus N minus one must fit the configured context. The last predicted token is emitted without taking a new cache position. All arguments are checked before inference.
 
-Gli ID nell'esempio seguente rappresentano la domanda `What is the capital of France?` con il chat template ufficiale.
+The IDs in the next example are the question `What is the capital of France?` in the official chat template.
 
 ~~~sh
 ./build/lfm-next weights/model.safetensors --generate 32 1 6 6423 708 3493 856 779 5706 803 4481 540 7 708 6 64015 708
 ~~~
 
-Produce gli ID `1098 5706 803 4481 856 5242 523 7`, uno per riga. La chiamata equivalente con `--text 32 "What is the capital of France?"` stampa direttamente `The capital of France is Paris.`
+It prints the IDs `1098 5706 803 4481 856 5242 523 7`, one per line. The equivalent call with `--text 32 "What is the capital of France?"` prints `The capital of France is Paris.`
 
-Le modalita diagnostiche `--encode "testo"` e `--decode ID ...` espongono il tokenizer. Encode restituisce gli ID senza BOS implicito e decode omette i token speciali. Entrambe rispettano il numero di token consentito dal contesto configurato e usano le sole tabelle, quindi il percorso del checkpoint puo essere sostituito da `_`.
+The diagnostic modes `--encode "text"` and `--decode ID ...` expose the tokenizer. Encode returns IDs without an implicit BOS and decode leaves out special tokens. Both respect the token count allowed by the configured context and use only the tables, so the checkpoint path can be replaced by `_`.
 
-### Avvio come kernel in QEMU
+### Booting as a kernel in QEMU
 
-Il kernel esegue inferenza e chat senza Linux nel sistema ospite. Multiboot 1 supporta l'avvio diretto di QEMU; Multiboot 2 supporta GRUB in modalita BIOS e UEFI. Il codice configura GDT, paging, long mode, stato SSE/AVX e gestori di eccezione. La cache viene allocata dalla mappa RAM del bootloader; pesi e tokenizer rimangono in memoria.
+The kernel runs inference and chat with no Linux in the guest. Multiboot 1 supports QEMU direct boot; Multiboot 2 supports GRUB in BIOS and UEFI mode. The code sets up the GDT, paging, long mode, the SSE/AVX state and exception handlers. The cache is allocated from the bootloader's RAM map; weights and tokenizer stay in memory.
 
-Oltre agli strumenti della build Linux servono GNU objcopy, QEMU, Pillow e il font DejaVu. La generazione del font usa `FONT_PYTHON=python3`, distinto dall'interprete `PYTHON` eventualmente impostato sul venv del modello. Il percorso verificato usa KVM su Linux/WSL2 con accesso a `/dev/kvm`. Per installare anche gli strumenti dell'immagine BIOS/UEFI su Ubuntu:
+Besides the Linux build tools this needs GNU objcopy, QEMU, Pillow and the DejaVu, Unifont and Noto Color Emoji fonts. Font generation uses `FONT_PYTHON=python3`, separate from a `PYTHON` that may point at the model's venv. The verified setup uses KVM on Linux/WSL2 with access to `/dev/kvm`. To install the BIOS/UEFI image tools as well on Ubuntu:
 
 ~~~sh
-sudo apt-get install --no-install-recommends qemu-system-x86 qemu-system-gui python3-pil fonts-dejavu-core grub-pc-bin grub-efi-amd64-bin xorriso mtools ovmf
+sudo apt-get install --no-install-recommends qemu-system-x86 qemu-system-gui python3-pil python3-fonttools fonts-dejavu-core unifont fonts-noto-color-emoji grub-pc-bin grub-efi-amd64-bin xorriso mtools ovmf
 make os MODEL=weights/model.safetensors
 python3 os/run.py build/lfm-boot.bundle
 ~~~
 
-La build produce `build/lfm-os.elf` e `build/lfm-boot.bundle`. Il secondo contiene una copia invariata del checkpoint BF16 e delle tabelle tokenizer: 713.213.887 byte con i file verificati. Il kernel e un ELF32 per il caricatore Multiboot di QEMU, ma passa a 64 bit prima dell'inferenza. L'ELF64 intermedio resta disponibile in `build/lfm-os.elf64`.
+The build produces `build/lfm-os.elf` and `build/lfm-boot.bundle`. The bundle holds an unchanged copy of the BF16 checkpoint and of the tokenizer tables: 713,213,887 bytes with the verified files. The kernel is an ELF32 for QEMU's Multiboot loader but switches to 64 bits before inference. The intermediate ELF64 stays available in `build/lfm-os.elf64`.
 
-Nell'ambiente gia predisposto, da PowerShell nella directory del repository:
+In the prepared environment, from PowerShell in the repository directory:
 
 ~~~powershell
 wsl -d Ubuntu -- make os MODEL=/opt/lfm-model/model.safetensors OS_BUNDLE=/opt/lfm-model/lfm-boot.bundle PYTHON=/opt/lfm-venv/bin/python
 wsl -d Ubuntu -- /opt/lfm-venv/bin/python os/run.py /opt/lfm-model/lfm-boot.bundle
 ~~~
 
-Il launcher assegna sei CPU alla VM e richiede sei worker totali, incluso il processore principale. `--cpus` cambia le CPU virtuali disponibili; `--threads` cambia quelle richieste dal kernel, entrambe da 1 a 16. Le tabelle ACPI MADT individuano i processori, che vengono avviati tramite xAPIC e sequenza INIT/SIPI. Il kernel usa solo le CPU avviate e compatibili con il percorso SIMD scelto; ACPI o xAPIC non supportati lasciano attivo un solo processore. Ogni worker calcola righe complete delle matrici, mantenendo l'ordine delle riduzioni.
+The launcher gives the VM six CPUs and asks the kernel for six workers, the main processor included. `--cpus` changes the virtual CPUs and `--threads` the processors requested by the kernel, both from 1 to 16. The ACPI MADT tables list the processors, which start through xAPIC and the INIT/SIPI sequence. The kernel uses only processors that started and support the selected SIMD path; unsupported ACPI or xAPIC leaves one processor active. Each worker computes whole matrix rows and keeps the reduction order.
 
-L'avvio diretto usa 2.048 posizioni e un massimo di 32 token per risposta. La chat supporta `/clear`, `/quit`, Ctrl-D, CRLF e backspace, e i comandi del motore descritti per il modello principale, tranne il ragionamento. `--context` e `--tokens` cambiano i limiti. La RAM predefinita e 2 GiB; `--memory` modifica la memoria della VM. La cache conserva il costo di 24 KiB per posizione. Se la memoria non basta, il kernel stampa un errore e termina.
+Direct boot uses 2,048 positions and at most 32 tokens per answer. The chat supports `/clear`, `/quit`, Ctrl-D, CRLF and backspace, and the engine commands described for the main model except reasoning. `--context` and `--tokens` change the limits. The default RAM is 2 GiB; `--memory` changes the VM memory. The cache keeps its cost of 24 KiB per position. If memory is insufficient, the kernel prints an error and stops.
 
-`--display gtk` apre la console video, la stessa console Pithos CORE del modello principale: Unicode con emoji a colori, tredici layout di tastiera, barra di stato e comandi della chat. L'avvio diretto usa VGA testuale; GRUB richiede un framebuffer RGB a 32 bit, normalmente 1024x768. COM1 conserva il testo UTF-8 completo con le stesse sequenze di colore. In assenza di una porta seriale, l'inferenza e la console video continuano a funzionare.
+`--display gtk` opens the video console, the same Pithos CORE console as the main model: Unicode with colour emoji, thirteen keyboard layouts, a status line and the chat commands. Direct boot uses VGA text; GRUB requests a 32-bit RGB framebuffer, normally 1024x768. COM1 keeps the complete UTF-8 text with the same colour sequences. Without a serial port, inference and the video console keep working.
 
-Per una singola risposta o gli ID generati:
+For a single answer or the generated IDs:
 
 ~~~sh
 python3 os/run.py build/lfm-boot.bundle --mode text --tokens 32 --prompt "What is the capital of France?"
 python3 os/run.py build/lfm-boot.bundle --mode ids --tokens 8 --prompt "What is the capital of France?"
 ~~~
 
-Le modalita singole delimitano il risultato con `<lfm-output>` e `</lfm-output>` sulla seriale. Il launcher interpreta il dispositivo QEMU `isa-debug-exit`, restituendo zero se il kernel termina correttamente. Con QEMU diretto, il codice host 33 indica successo del guest e 35 indica errore; il codice 1 di un errore di avvio di QEMU resta un errore. Senza KVM si puo specificare `--accel tcg`, ma l'emulazione software dell'inferenza e molto piu lenta.
+The single modes delimit the result with `<lfm-output>` and `</lfm-output>` on the serial port. The launcher interprets QEMU's `isa-debug-exit` device and returns zero when the kernel ends correctly. With direct QEMU, host exit code 33 means guest success and 35 a guest error; exit code 1 from a QEMU start-up error stays an error. Without KVM, `--accel tcg` works, but software emulation of inference is much slower.
 
-### Immagine BIOS/UEFI e USB
+### BIOS/UEFI and USB image
 
 ~~~sh
 make os-image MODEL=weights/model.safetensors
@@ -166,207 +176,208 @@ python3 os/run.py --iso build/lfm-os.iso --uefi --display gtk
 python3 os/run.py --iso build/lfm-os.iso --uefi --usb --display gtk
 ~~~
 
-`build/lfm-os.iso` e un'immagine ibrida GRUB, circa 726 MB, contenente kernel, tokenizer e checkpoint BF16 invariato. Puo essere scritta come immagine raw su una chiavetta per avviare una macchina x86-64 compatibile BIOS o UEFI. La procedura di build crea soltanto il file ISO e non scrive su dispositivi fisici. GRUB legge i dati dal supporto e li consegna al kernel; dopo il boot il kernel lavora interamente in RAM e non accede al filesystem.
+`build/lfm-os.iso` is a hybrid GRUB image of about 729 MB holding the kernel, the tokenizer and the unchanged BF16 checkpoint. It can be written raw to a USB stick to boot an x86-64 machine with BIOS or UEFI. The build only creates the ISO file and never writes to physical devices. GRUB reads the data from the medium and hands it to the kernel; after boot the kernel works entirely in RAM and does not access the filesystem.
 
-L'immagine avvia la chat con 64 token per risposta, contesto 2.048 e un massimo di sei CPU attive. I parametri sono incorporati in `grub.cfg`; il launcher consente di cambiare CPU e RAM virtuali, ma rifiuta parametri del kernel che non potrebbero modificare l'immagine. Per un'immagine con limiti differenti:
+The image starts the chat with 64 tokens per answer, a 2,048-position context and at most six active CPUs. The parameters are embedded in `grub.cfg`; the launcher can change virtual CPUs and RAM but rejects kernel parameters that could not change the image. For an image with different limits:
 
 ~~~sh
-python3 os/image.py build/lfm-os.elf build/lfm-boot.bundle build/lfm-os.iso --options "mode=chat tokens=128 context=4096 threads=4"
+python3 os/image.py build/lfm-os.elf build/lfm-boot.bundle build/lfm-os.iso --options "mode=chat tokens=128 context=4096 threads=4 keymap=it"
 ~~~
 
-L'ambiente predisposto conserva anche una copia nel filesystem Linux, che evita il costo degli accessi al disco attraverso il mount Windows:
+The prepared environment also keeps a copy on the Linux filesystem, which avoids the cost of disk access through the Windows mount:
 
 ~~~powershell
 wsl -d Ubuntu -- make os-image MODEL=/opt/lfm-model/model.safetensors OS_BUNDLE=/opt/lfm-model/lfm-boot.bundle OS_IMAGE=/opt/lfm-model/lfm-os.iso PYTHON=/opt/lfm-venv/bin/python
 wsl -d Ubuntu -- /opt/lfm-venv/bin/python os/run.py --iso /opt/lfm-model/lfm-os.iso --uefi --usb --display gtk
 ~~~
 
-Il percorso da immagine usa QEMU q35 con AHCI/DMA, evitando il caricamento dei pesi tramite IDE PIO. L'emulazione USB usa un controller USB2 EHCI: xHCI ha prodotto blocchi intermittenti del firmware durante le prove in WSL/KVM, anche con MSI disattivato. Il caricamento dei circa 713 MB tramite EHCI puo richiedere oltre un minuto; l'avvio da CD virtuale o diretto e piu rapido per lo sviluppo. OVMF usa xAPIC, MMIO PCI sotto 4 GiB e una copia temporanea delle variabili firmware. La dimensione della finestra MMIO si imposta tramite la [configurazione ufficiale OVMF](https://github.com/tianocore/edk2/blob/master/OvmfPkg/RUNTIME_CONFIG.md). L'immagine non e firmata: sui PC con Secure Boot attivo serve disabilitarlo per avviarla.
+The image path uses QEMU q35 with AHCI/DMA, which avoids loading the weights through IDE PIO. USB emulation uses a USB2 EHCI controller: xHCI produced intermittent firmware hangs during tests on WSL/KVM, even with MSI disabled. Loading about 713 MB through EHCI can take over a minute; CD or direct boot is faster for development. OVMF uses xAPIC, PCI MMIO below 4 GiB and a temporary copy of the firmware variables. The MMIO window size is set through the [official OVMF configuration](https://github.com/tianocore/edk2/blob/master/OvmfPkg/RUNTIME_CONFIG.md). The image is not signed: PCs with Secure Boot enabled must disable it to boot.
 
-Il boot e verificato in QEMU, non ancora su un PC fisico. La compatibilita attuale richiede RAM utilizzabile sotto 4 GiB, framebuffer RGB a 32 bit sotto 4 GiB oppure VGA/seriale, e tastiera PS/2 o seriale. Non e incluso un driver USB HID: l'avvio da supporto USB e gestito dal firmware/GRUB e non implica il funzionamento di ogni tastiera USB dopo il boot. Le CPU con x2APIC gia attivo usano il fallback a un core. Console e worker usano attesa attiva; il risparmio energetico in inattivita e ancora da implementare. Su hardware fisico `/quit` arresta i processori, ma non effettua uno spegnimento ACPI.
+Booting is verified in QEMU, not yet on a physical PC. Current compatibility requires usable RAM below 4 GiB, a 32-bit RGB framebuffer below 4 GiB or VGA/serial, and a PS/2 or serial keyboard. There is no USB HID driver: booting from USB is handled by the firmware and GRUB and does not imply that every USB keyboard works after boot. CPUs with x2APIC already enabled fall back to one core. The console and the workers busy-wait; idle power saving is not implemented yet. On physical hardware `/quit` halts the processors but does not perform an ACPI power-off.
 
-### Verifiche del kernel
+### Kernel verification
 
 ~~~sh
 make verify-os MODEL=weights/model.safetensors
 make verify-platform MODEL=weights/model.safetensors
 ~~~
 
-`verify-os` confronta token, testo UTF-8 e tutti i 65.536 logit con Linux a un thread. Copre chat con cronologia, reset, errori di input, limite della cache, CPU senza AVX/XSAVE, modulo mancante o corrotto e RAM insufficiente. `verify-platform` verifica generazione con 1, 2, 3, 4, 6 e 16 CPU, logit con 3 e 6 CPU, fallback senza ACPI, VGA, tastiera PS/2 e assenza di COM1. Avvia inoltre l'immagine con BIOS/UEFI da CD e USB emulati, verifica una risposta in ogni caso e salva le schermate in `build/os-*.png`. Richiede KVM e costruisce anche l'immagine e il kernel diagnostico `lfm-os-logits.elf`.
+`verify-os` compares tokens, UTF-8 text and all 65,536 logits with single-threaded Linux. It covers chat with history, reset, input errors, the cache limit, CPUs without AVX/XSAVE, a missing or corrupt module and insufficient RAM. `verify-platform` checks generation on 1, 2, 3, 4, 6 and 16 CPUs, logits on 3 and 6 CPUs, the fallback without ACPI, VGA, the PS/2 keyboard and a missing COM1. It also boots the image from emulated CD and USB with BIOS and UEFI, checks an answer in each case and saves the screens to `build/os-*.png`. It needs KVM and also builds the image and the diagnostic kernel `lfm-os-logits.elf`.
 
-Verifica completata il 26 novembre 2026 con QEMU 10.2.1 e KVM in WSL2: cinque sequenze greedy e tre risposte testuali coincidono con Linux; tutti i logit sono identici bit per bit per due prompt. Il bundle conserva gli hash SHA-256 di checkpoint e tokenizer. Sono passati anche i test della chat seriale e degli errori di boot. Con contesto 32.768 sono verificate allocazione e prima predizione con 2 GiB di RAM, e il rifiuto della cache con 1 GiB; questo non costituisce una verifica numerica di sequenze lunghe 32.768 token. Le suite Linux di logit, generazione, chat, tokenizer e thread sono passate dopo la separazione delle piattaforme.
+Verification completed on 26 November 2026 with QEMU 10.2.1 and KVM on WSL2: five greedy sequences and three text answers match Linux; all logits are bitwise identical for two prompts. The bundle preserves the SHA-256 hashes of checkpoint and tokenizer. The serial chat and boot error tests passed as well. With a 32,768-position context, allocation and the first prediction are verified with 2 GiB of RAM, and the cache refusal with 1 GiB; this is not a numerical verification of 32,768-token sequences. The Linux suites for logits, generation, chat, tokenizer and threads passed after the platforms were separated.
 
-Le verifiche della piattaforma sono passate con 1, 2, 3, 4, 6 e 16 CPU, logit bit-identici a 3 e 6 CPU e fallback senza ACPI. BIOS/UEFI da CD e USB emulati hanno completato una risposta da tastiera PS/2. Il percorso UEFI/USB con EHCI e stato verificato anche dopo un avvio a freddo di WSL e su avvii successivi. Senza il dispositivo QEMU di uscita, tutti e quattro i processori controllati raggiungono HLT dopo `/quit`. Le suite Linux di logit fino a 512 token e generazione fino a 64 token sono state rieseguite con successo.
+The platform checks passed on 1, 2, 3, 4, 6 and 16 CPUs, with bitwise identical logits on 3 and 6 CPUs and the fallback without ACPI. BIOS/UEFI boots from emulated CD and USB completed an answer typed on the PS/2 keyboard. The UEFI/USB path with EHCI was also verified after a cold WSL start and on subsequent boots. Without the QEMU exit device, all four checked processors reach HLT after `/quit`. The Linux suites for logits up to 512 tokens and generation up to 64 tokens were run again successfully. With the Pithos CORE console all these suites passed again on 27 November 2026.
 
-Il benchmark del kernel si esegue senza altre VM o benchmark in parallelo:
+The kernel benchmark runs with no other VMs or benchmarks in parallel:
 
 ~~~sh
 make benchmark-os MODEL=weights/model.safetensors
 ~~~
 
-Usa sei vCPU, RAM di 2 GiB, contesto 512, lo stesso prompt da 25 token del benchmark Linux e 64 token generati. Confronta 1, 2, 4 e 6 CPU attive, controllando l'identita degli ID, con un riscaldamento e tre campioni per configurazione in ordine alternato. Distingue il caricamento/avvio della VM dal prefill e dalla generazione successiva. Campioni e mediane sono in `build/os-benchmark.json`.
+It uses six vCPUs, 2 GiB of RAM, a 512-position context, the same 25-token prompt as the Linux benchmark and 64 generated tokens. It compares 1, 2, 4 and 6 active CPUs, checks that the IDs are identical, and runs one warm-up and three samples per configuration in alternating order. It separates VM loading and start-up from prefill and subsequent generation. Samples and medians are in `build/os-benchmark.json`.
 
-Misure del 26 novembre 2026 su Intel Core i7-10750H, QEMU 10.2.1/KVM in WSL2, pesi BF16 nel filesystem Linux. Il prefill della tabella esclude l'avvio della VM; il totale lo include. La generazione successiva misura i 63 intervalli tra il primo e il sessantaquattresimo token.
+Measured on 26 November 2026 on an Intel Core i7-10750H, QEMU 10.2.1/KVM on WSL2, BF16 weights on the Linux filesystem. Prefill in the table excludes VM start-up; the total includes it. Subsequent generation measures the 63 intervals between the first and the sixty-fourth token.
 
-| CPU attive | Prefill e primo token | Generazione successiva | Totale con avvio VM |
+| Active CPUs | Prefill and first token | Subsequent generation | Total with VM start-up |
 | --- | --- | --- | --- |
-| 1 | 990 ms | 20,67 token/s | 4,61 s |
-| 2 | 782 ms | 29,05 token/s | 4,00 s |
-| 4 | 648 ms | 29,55 token/s | 3,41 s |
-| 6 | 623 ms | 32,13 token/s | 3,23 s |
+| 1 | 990 ms | 20.67 tokens/s | 4.61 s |
+| 2 | 782 ms | 29.05 tokens/s | 4.00 s |
+| 4 | 648 ms | 29.55 tokens/s | 3.41 s |
+| 6 | 623 ms | 32.13 tokens/s | 3.23 s |
 
-Sei CPU hanno dato il risultato migliore fra le configurazioni misurate, circa il 55% in piu nella generazione rispetto a una CPU. Il risultato riguarda questa macchina e questo carico; gli avvii BIOS/UEFI da immagine non sono inclusi nel benchmark, che usa il caricamento Multiboot diretto di QEMU.
+Six CPUs gave the best result among the measured configurations, about 55% faster generation than one CPU. The result applies to this machine and this workload; BIOS/UEFI image boots are not part of the benchmark, which uses QEMU's direct Multiboot loading.
 
-Linux/WSL resta il sistema host che esegue QEMU e gli strumenti di preparazione. I test non equivalgono a una certificazione di compatibilita hardware o a un confronto di velocita con altri runtime.
+Linux/WSL remains the host that runs QEMU and the preparation tools. The tests are not a hardware compatibility certification or a speed comparison with other runtimes.
 
-### Qualita
+### Quality
 
-Il progetto usa esclusivamente i pesi BF16 ufficiali, con attivazioni e accumulazioni FP32. Questa configurazione ha dato la qualita migliore tra quelle provate e conserva la precisione dei pesi originali. Il checkpoint occupa 708.984.464 byte; cache e buffer richiedono memoria aggiuntiva.
+The project uses only the official BF16 weights, with FP32 activations and accumulation. This configuration gave the best quality among those tried and keeps the precision of the original weights. The checkpoint takes 708,984,464 bytes; cache and buffers need additional memory.
 
-`quality_corpus.json` contiene 12 testi originali, sei italiani e sei inglesi, per 1.739 token valutati, e otto richieste semplici. E un piccolo corpus diagnostico, non un benchmark rappresentativo delle capacita generali.
+`quality_corpus.json` holds 12 original texts, six Italian and six English, for 1,739 evaluated tokens, and eight simple requests. It is a small diagnostic corpus, not a benchmark representative of general capabilities.
 
 ~~~sh
 make evaluate-quality MODEL=weights/model.safetensors
 ~~~
 
-La valutazione usa Transformers in FP32 con i pesi BF16 ufficiali, un BOS per documento, nessun troncamento o EOS aggiunto e medie pesate per il numero di token. Un documento per lingua viene verificato confrontando gli ultimi logit con il runtime assembly. Le risposte alle otto richieste vengono generate dal runtime. Metodo, hash del corpus, risultati per documento e risposte complete sono in `build/quality-report.json`.
+The evaluation uses Transformers in FP32 with the official BF16 weights, one BOS per document, no truncation or added EOS, and averages weighted by token count. One document per language is checked by comparing the last logits with the assembly runtime. The answers to the eight requests are generated by the runtime. Method, corpus hash, per-document results and complete answers are in `build/quality-report.json`.
 
-La perplexity misurata e 27,44 in italiano, 32,86 in inglese e 29,55 complessivamente. Cinque delle otto risposte rispettano il risultato e il formato richiesti. Il confronto ignora maiuscole, spazi e punti finali; una spiegazione aggiunta quando viene richiesta una sola parola puo quindi risultare non conforme.
+The measured perplexity is 27.44 in Italian, 32.86 in English and 29.55 overall. Five of the eight answers meet the requested result and format. The comparison ignores case, spaces and final periods; an explanation added when a single word is requested can therefore count as non-compliant.
 
-### Verifica
+### Verification
 
-Con PyTorch e Transformers che supporta LFM2 installati, eseguire:
+With PyTorch and a Transformers release that supports LFM2 installed, run:
 
 ~~~sh
 make verify MODEL=weights/model.safetensors
 ~~~
 
-Il test confronta la predizione greedy e tutti i 65.536 logit per sequenze da 1, 2, 5, 16, 64 e 512 token. La domanda formattata con il chat template ufficiale viene ripetuta per esercitare anche il limite della cache. Il riferimento usa gli stessi pesi in FP32 con attenzione eager. Le tolleranze sono assoluta 0,001 e relativa 0,0001. Il test verifica anche il rifiuto degli argomenti fuori intervallo o malformati.
+The test compares the greedy prediction and all 65,536 logits for sequences of 1, 2, 5, 16, 64 and 512 tokens. The question formatted with the official chat template is repeated to exercise the cache limit as well. The reference uses the same weights in FP32 with eager attention. The tolerances are 0.001 absolute and 0.0001 relative. The test also checks that out-of-range or malformed arguments are rejected.
 
-L'ambiente di verifica su questa macchina risiede in Ubuntu WSL2, in `/opt/lfm-venv`. Da PowerShell nella directory del repository si esegue con
+On this machine the verification environment lives in Ubuntu WSL2, in `/opt/lfm-venv`. From PowerShell in the repository directory:
 
 ~~~powershell
 wsl -d Ubuntu -- make verify MODEL=weights/model.safetensors PYTHON=/opt/lfm-venv/bin/python
 ~~~
 
-Con AVX2/FMA il prompt viene elaborato a blocchi di 15 token, mantenendo i pesi BF16. Il percorso scalare elabora ancora il prompt token per token.
+With AVX2/FMA the prompt is processed in blocks of 15 tokens, keeping the BF16 weights. The scalar path still processes the prompt token by token.
 
-Verifica BF16 completata il 26 novembre 2026 su Ubuntu WSL2 con NASM 3.01, PyTorch 2.15.0+cpu e Transformers 5.24.1. Le sei predizioni coincidono con il riferimento, fino a 512 token. Lo scarto massimo assoluto sui logit e 0,00018620. La domanda `What is the capital of France?` produce come primo token `The` (ID 1098). L'eseguibile ELF e statico; pesi e tabelle del tokenizer sono in file separati.
+BF16 verification completed on 26 November 2026 on Ubuntu WSL2 with NASM 3.01, PyTorch 2.15.0+cpu and Transformers 5.24.1. The six predictions match the reference, up to 512 tokens. The largest absolute logit error is 0.00018620. The question `What is the capital of France?` yields `The` (ID 1098) as its first token. The ELF executable is static; weights and tokenizer tables are separate files.
 
-SHA-256 del checkpoint verificato
+SHA-256 of the verified checkpoint
 
 ~~~text
 1c9c77a4471a7f590f85240f74ed1fc26df7fbde88c3006724e2f93ca993ea4e
 ~~~
 
-### Implementazione
+### Implementation
 
-- main.asm verifica il modello, esegue gli strati e calcola i logit con la matrice di embedding condivisa.
-- platform_linux.asm gestisce CLI, caricamento dei file, memoria e I/O tramite syscall Linux.
-- os/boot.asm e os/platform.asm gestiscono avvio a 64 bit, modulo BF16, allocazione della RAM e I/O del kernel autonomo.
-- os/multiboot.asm normalizza le informazioni di avvio Multiboot 2; os/smp.asm rileva e avvia le CPU e distribuisce le righe delle matrici.
-- os/console.asm gestisce VGA, framebuffer RGB, decodifica UTF-8 per il font Latin-1 e tastiera PS/2.
-- kernels.asm implementa prodotti matrice-vettore, RMSNorm, esponenziale e convoluzione causale con due campioni di storia per canale.
-- attention.asm normalizza query e key per testa, applica RoPE e calcola la grouped-query attention sulla cache.
-- layers.inc contiene l'ordine dei dieci blocchi convoluzionali e dei sei blocchi di attenzione.
-- threads.asm implementa il gruppo di worker tramite le syscall clone e futex. Ogni worker calcola righe complete della matrice. Una breve attesa attiva precede il blocco su futex e il processo termina tutti i worker tramite exit_group.
-- tokenizer.asm implementa la suddivisione Unicode del testo, il riconoscimento dei token aggiunti, i merge BPE e la decodifica UTF-8 in streaming. Il tokenizer opera sul thread principale tra i lavori di inferenza e usa tabelle in sola lettura.
-- chat.asm gestisce la lettura delle righe, i comandi della chat, il recupero dagli errori di input e l'allocazione della cache tramite il backend della piattaforma.
+- main.asm checks the model, runs the layers and computes the logits with the shared embedding matrix.
+- platform_linux.asm handles the CLI, file loading, memory and I/O through Linux system calls.
+- os/boot.asm and os/platform.asm handle the 64-bit start, the boot module, RAM allocation and the I/O of the standalone kernel.
+- os/multiboot.asm normalizes the Multiboot 2 boot information; os/smp.asm detects and starts the CPUs and distributes matrix rows.
+- os/ui.asm draws the Pithos CORE console on VGA or an RGB framebuffer, with Unicode glyphs, colour emoji and keyboard layouts; os/console.asm is the former Latin-1 console.
+- kernels.asm implements matrix-vector products, RMSNorm, the exponential and the causal convolution with two history samples per channel.
+- attention.asm normalizes queries and keys per head, applies RoPE and computes grouped-query attention over the cache.
+- engine.asm implements sampling, the system prompt, statistics and the chat commands for both models.
+- layers.inc holds the order of the ten convolution blocks and the six attention blocks.
+- threads.asm implements the worker pool with the clone and futex system calls. Each worker computes whole matrix rows. A short spin precedes the futex wait, and the process ends all workers through exit_group.
+- tokenizer.asm implements Unicode pre-tokenization, added-token matching, BPE merges and streaming UTF-8 decoding. The tokenizer runs on the main thread between inference jobs and uses read-only tables.
+- chat.asm handles line input, chat commands, recovery from input errors and cache allocation through the platform backend.
 
-I prodotti matrice-vettore AVX2 espandono i BF16 esattamente in FP32 e usano quattro accumulatori FMA indipendenti. La selezione verifica anche il supporto del sistema operativo ai registri YMM tramite XGETBV. Le rotazioni RoPE vengono calcolate una volta per posizione e riutilizzate dalle 144 teste query/key dei sei strati di attenzione. L'attenzione elabora quattro componenti per istruzione SSE e RMSNorm calcola una sola divisione per vettore.
+The AVX2 matrix-vector products expand BF16 to FP32 exactly and use four independent FMA accumulators. Kernel selection also checks operating-system support for the YMM registers through XGETBV. RoPE rotations are computed once per position and reused by the 144 query/key heads of the six attention layers. RMSNorm computes a single division per vector.
 
-Con lo stesso percorso AVX2/FMA, l'esponenziale della SiLU negli MLP e della softmax nell'attenzione elabora otto valori per istruzione. La riduzione dell'argomento segue Cephes, con un polinomio di quinto grado e gli stessi limiti di ±80 della versione x87. Su 1.048.576 input fra -90 e 90 l'errore massimo e 1,002 ulp, contro 0,5 ulp della x87. La softmax maschera l'ultimo blocco incompleto, quindi le posizioni oltre quella corrente non vengono lette ne sommate. La build scalare e le CPU senza AVX2/FMA mantengono l'esponenziale x87, con risultati identici bit per bit a prima. Tutte le verifiche di Linux e del kernel sono passate anche con questa modifica: logit entro le tolleranze di Transformers, con scarto massimo 0,000115, e bit-identici fra thread, fra core e fra Linux e kernel. Su una macchina con quattro CPU visibili in WSL2 la generazione e cresciuta di circa il 10-14%, con un margine di rumore fra ripetizioni vicino al 10%.
+On the same AVX2/FMA path, the exponential of the SiLU in the MLPs and of the attention softmax processes eight values per instruction. Argument reduction follows Cephes, with a fifth-degree polynomial and the same ±80 bounds as the x87 version. Over 1,048,576 inputs between -90 and 90 the largest error is 1.002 ulp, against 0.5 ulp for x87. The softmax masks the final partial block, so positions past the current one are neither read nor summed. The scalar build and CPUs without AVX2/FMA keep the x87 exponential, with bitwise identical results. All Linux and kernel verifications passed with this change: logits within the Transformers tolerances, with a largest error of 0.000115, and bitwise identical across threads, cores and between Linux and the kernel. On a machine with four CPUs visible in WSL2, generation rose by about 10-14%, with a run-to-run noise of about 10%.
 
-Anche l'attenzione ha un percorso AVX2/FMA. Le 64 componenti della query restano nei registri durante i prodotti con le key, e una sola passata sulle posizioni accumula tutte le componenti dei valori. Le 16 teste sono distribuite fra i worker, e ogni partizione usa una propria riga di punteggi. Ogni testa e calcolata dallo stesso codice qualunque sia il thread, quindi i logit restano identici bit per bit fra 1 e 16 thread o core. Linux e kernel condividono il meccanismo dei job: i worker eseguono la funzione indicata da `job_entry`, che puo essere il matvec o l'attenzione. Il percorso scalare dell'attenzione resta sul thread principale. Sulla stessa macchina, con 1.900 posizioni in cache, la generazione e salita da 15,8 a 21,4 token/s con un thread e da circa 23 a 28 token/s con quattro.
+Attention also has an AVX2/FMA path. The 64 query components stay in registers during the products with the keys, and a single pass over the positions accumulates all value components. The 16 heads are distributed among the workers, and each partition uses its own score row. Every head is computed by the same code whatever the thread, so the logits stay bitwise identical between 1 and 16 threads or cores. Linux and the kernel share the job mechanism: the workers run the function named by `job_entry`, which can be the matrix product or attention. The scalar attention path stays on the main thread. On the same machine, with 1,900 cached positions, generation rose from 15.8 to 21.4 tokens/s on one thread and from about 23 to 28 tokens/s on four.
 
-Il prompt viene elaborato a blocchi di 15 token, impostabili a compile time con `-DPREFILL_BLOCK=N`. Nelle matrici ogni riga di pesi viene letta una sola volta per blocco, e ogni vettore BF16 convertito serve fino a tre token. Ogni coppia (riga, token) usa gli stessi quattro accumulatori e lo stesso albero di riduzione del matvec a un token, quindi il prefill a blocchi e identico bit per bit all'elaborazione token per token. Normalizzazioni, stato delle convoluzioni, RoPE e attenzione avanzano un token alla volta nell'ordine originale. Le key e i valori del blocco vengono scritti in cache prima dell'attenzione, e ogni token legge solo le posizioni fino alla propria. Logit, generazione e trascrizioni della chat coincidono byte per byte con la versione precedente, per prompt da 1 a 511 token e con 1, 3 e 4 thread. Sulla stessa macchina, misurando l'intero processo fino al primo token, i tempi sono questi:
+The prompt is processed in blocks of 15 tokens, set at compile time with `-DPREFILL_BLOCK=N`. In the matrices each weight row is read once per block, and each converted BF16 vector serves up to three tokens. Each (row, token) pair uses the same four accumulators and the same reduction tree as the single-token product, so the block prefill is bitwise identical to token-by-token processing. Normalization, convolution state, RoPE and attention advance one token at a time in the original order. The keys and values of the block are written to the cache before attention, and each token reads only positions up to its own. Logits, generation and chat transcripts match the previous version byte for byte, for prompts of 1 to 511 tokens and with 1, 3 and 4 threads. On the same machine, measuring the whole process up to the first token:
 
-| Prompt | Thread | Token per token | A blocchi | Accelerazione |
+| Prompt | Threads | Token by token | Blocks | Speed-up |
 | --- | --- | --- | --- | --- |
-| 25 token | 1 | 896 ms | 371 ms | 2,4x |
-| 512 token | 1 | 18,66 s | 7,53 s | 2,5x |
-| 25 token | 4 | 631 ms | 179 ms | 3,5x |
-| 512 token | 4 | 16,55 s | 3,51 s | 4,7x |
+| 25 tokens | 1 | 896 ms | 371 ms | 2.4x |
+| 512 tokens | 1 | 18.66 s | 7.53 s | 2.5x |
+| 25 tokens | 4 | 631 ms | 179 ms | 3.5x |
+| 512 tokens | 4 | 16.55 s | 3.51 s | 4.7x |
 
-Il prefill a blocchi e limitato dal calcolo FMA e non piu dalla banda di memoria, quindi scala con i thread; blocchi piu grandi di 15 token non hanno migliorato i tempi.
+Block prefill is limited by FMA throughput rather than memory bandwidth, so it scales with threads; blocks larger than 15 tokens did not improve the times.
 
-Le scelte architetturali seguono il rapporto tecnico LFM2 e la configurazione del checkpoint. Le matrici dense dei blocchi convoluzionali e degli MLP restano il principale obiettivo del kernel vettoriale. [Rapporto tecnico Liquid AI](https://arxiv.org/html/2511.23404v1#S2)
+The architectural choices follow the LFM2 technical report and the checkpoint configuration. The dense matrices of the convolution blocks and the MLPs remain the main target of the vector kernels. [Liquid AI technical report](https://arxiv.org/html/2511.23404v1#S2)
 
-Per confrontare sullo stesso checkpoint il percorso scalare e quello selezionato automaticamente, eseguire
+To compare the scalar path and the automatically selected one on the same checkpoint, run
 
 ~~~sh
 make benchmark MODEL=weights/model.safetensors
 ~~~
 
-Il benchmark misura il tempo dell'intero processo per predire un token, incluso il prompt. Esegue un riscaldamento e tre ripetizioni con ordine alternato, verifica il token prodotto e salva tutti i campioni in `build/benchmark.json`. Il file deve restare identico per entrambi gli eseguibili. Con WSL, la posizione dei pesi nel filesystem influenza sensibilmente la misura. La copia Linux usata per i confronti locali si trova in `/opt/lfm-model/model.safetensors`.
+The benchmark measures the time of the whole process to predict one token, prompt included. It runs one warm-up and three repetitions in alternating order, checks the predicted token and saves all samples to `build/benchmark.json`. The file must stay identical for both executables. On WSL, the location of the weights in the filesystem strongly affects the measurement. The Linux copy used for local comparisons is in `/opt/lfm-model/model.safetensors`.
 
-Misure del 26 novembre 2026 su Intel Core i7-10750H, Ubuntu WSL2, singolo thread e pesi BF16 nel filesystem Linux. Mediane di cinque ripetizioni dopo il riscaldamento, confrontando `lfm-scalar` e `lfm-next`.
+Measured on 26 November 2026 on an Intel Core i7-10750H, Ubuntu WSL2, one thread and BF16 weights on the Linux filesystem. Medians of five repetitions after warm-up, comparing `lfm-scalar` and `lfm-next`.
 
-| Prompt | Matvec scalare | Matvec AVX2/FMA | Accelerazione |
+| Prompt | Scalar matvec | AVX2/FMA matvec | Speed-up |
 | --- | --- | --- | --- |
-| 1 token | 351,68 ms | 65,26 ms | 5,39x |
-| 16 token | 4.455,52 ms | 637,90 ms | 6,98x |
+| 1 token | 351.68 ms | 65.26 ms | 5.39x |
+| 16 tokens | 4,455.52 ms | 637.90 ms | 6.98x |
 
-Per ripetere questa configurazione dalla shell Linux nella directory del repository
+To repeat this configuration from the Linux shell in the repository directory:
 
 ~~~sh
 make build/lfm-scalar build/lfm-next MODEL=/opt/lfm-model/model.safetensors
 python3 benchmark.py /opt/lfm-model/model.safetensors build/lfm-scalar build/lfm-next --repeats 5 --output build/benchmark.json
 ~~~
 
-La latenza include avvio, mmap, elaborazione del prompt e predizione finale. Le misure di questa sezione precedono il prefill a blocchi descritto in Implementazione. I risultati di altri runtime richiedono un confronto con gli stessi pesi, precisione e hardware.
+Latency includes start-up, mmap, prompt processing and the final prediction. The measurements in this section predate the block prefill described above. Results of other runtimes require a comparison with the same weights, precision and hardware.
 
-Il confronto successivo del parallelismo, sulla stessa CPU e con cinque ripetizioni dopo il riscaldamento, ha prodotto queste mediane per il prompt da 16 token.
+The following parallelism comparison, on the same CPU and with five repetitions after warm-up, gave these medians for the 16-token prompt.
 
-| Thread | Latenza | Accelerazione rispetto a 1 thread |
+| Threads | Latency | Speed-up over 1 thread |
 | --- | --- | --- |
-| 1 | 668,33 ms | 1,00x |
-| 2 | 481,73 ms | 1,39x |
-| 4 | 470,67 ms | 1,42x |
-| 6 | 472,06 ms | 1,42x |
-| 8 | 469,80 ms | 1,42x |
+| 1 | 668.33 ms | 1.00x |
+| 2 | 481.73 ms | 1.39x |
+| 4 | 470.67 ms | 1.42x |
+| 6 | 472.06 ms | 1.42x |
+| 8 | 469.80 ms | 1.42x |
 
-I risultati a 4, 6 e 8 thread sono vicini. Il valore predefinito di sei limita l'uso di thread su questa CPU con sei core fisici. Il limite riguarda i prodotti matrice-vettore, mentre le altre operazioni restano sul thread principale.
+The results at 4, 6 and 8 threads are close. The default of six limits thread use on this six-core CPU. The limit concerns the matrix-vector products, while the other operations stay on the main thread.
 
 ~~~sh
 make benchmark-threads MODEL=/opt/lfm-model/model.safetensors
 make verify-threads MODEL=/opt/lfm-model/model.safetensors
 ~~~
 
-La verifica dei thread confronta i logit bit per bit con il percorso a un thread, include partizioni con resto e contesti fino a 512 token, esegue otto richieste con quattro processi simultanei e controlla i valori non validi di LFM_THREADS.
+The thread verification compares logits bit for bit with the single-threaded path, includes partitions with remainders and contexts up to 512 tokens, runs eight requests in four simultaneous processes and checks invalid LFM_THREADS values.
 
-La chat e il contesto dinamico si verificano con
+The chat and the dynamic context are verified with
 
 ~~~sh
 make verify-chat MODEL=/opt/lfm-model/model.safetensors PYTHON=/opt/lfm-venv/bin/python
 ~~~
 
-Il confronto con Transformers copre quattro turni, reset, risposte troncate e chiusura dei turni, input rifiutati, CRLF ed EOF dopo una riga incompleta. Sono verificati anche l'esaurimento esatto della cache, un prompt di 513 token con contesto di 1.024 posizioni e i limiti della configurazione. A 32.768 posizioni viene verificata l'allocazione e una predizione iniziale. La verifica completa dei logit resta sui contesti fino a 512 posizioni.
+The comparison with Transformers covers four turns, reset, truncated answers and turn closing, rejected input, CRLF and EOF after an incomplete line. It also checks exact cache exhaustion, a 513-token prompt with a 1,024-position context and the configuration limits. At 32,768 positions it checks allocation and a first prediction. The full logit verification stays on contexts up to 512 positions.
 
-La verifica del tokenizer si esegue con
+The tokenizer is verified with
 
 ~~~sh
 make verify-tokenizer MODEL=/opt/lfm-model/model.safetensors PYTHON=/opt/lfm-venv/bin/python
 ~~~
 
-Sono passati 774 casi di codifica e 1.130 casi di decodifica, inclusi tutti gli ID del vocabolario in gruppi da 256, i token aggiunti, testo multilingue, emoji e UTF-8 malformato o incompleto. I test controllano anche i limiti di ingresso e la ricerca delle tabelle quando cambia la directory di lavoro. Le tabelle mancanti o corrotte producono un errore. L'inferenza testuale in inglese, italiano e cinese coincide con quella avviata dagli ID del tokenizer ufficiale.
+774 encoding cases and 1,130 decoding cases passed, including every vocabulary ID in groups of 256, the added tokens, multilingual text, emoji and malformed or incomplete UTF-8. The tests also check input limits and table lookup when the working directory changes. Missing or corrupt tables produce an error. Text inference in English, Italian and Chinese matches inference started from the IDs of the official tokenizer.
 
-La generazione continuativa si verifica e si misura con
+Continuous generation is verified and measured with
 
 ~~~sh
 make verify-generation MODEL=/opt/lfm-model/model.safetensors PYTHON=/opt/lfm-venv/bin/python
 make benchmark-generation MODEL=/opt/lfm-model/model.safetensors
 ~~~
 
-La verifica confronta con Transformers una risposta conclusa da EOS, una risposta limitata a tre token, una sequenza di 64 token e due token generati dopo un prompt di 511 posizioni. Controlla anche la compatibilita della CLI iniziale, gli argomenti non validi e l'identita della sequenza lunga tra uno e sei thread.
+The verification compares with Transformers an answer ended by EOS, an answer limited to three tokens, a 64-token sequence and two tokens generated after a 511-position prompt. It also checks compatibility with the original CLI, invalid arguments and the identity of the long sequence between one and six threads.
 
-Benchmark del 26 novembre 2026 sulla stessa CPU, pesi BF16 nel filesystem Linux, prompt di 25 token e generazione di 64 token. Mediane di tre ripetizioni dopo il riscaldamento.
+Benchmark of 26 November 2026 on the same CPU, BF16 weights on the Linux filesystem, a 25-token prompt and 64 generated tokens. Medians of three repetitions after warm-up.
 
-| Thread | Tempo al primo token | Generazione successiva | Tempo totale |
+| Threads | Time to first token | Subsequent generation | Total time |
 | --- | --- | --- | --- |
-| 1 | 979 ms | 21,45 token/s | 3,92 s |
-| 6 | 700 ms | 28,41 token/s | 2,92 s |
+| 1 | 979 ms | 21.45 tokens/s | 3.92 s |
+| 6 | 700 ms | 28.41 tokens/s | 2.92 s |
 
-Il benchmark osserva i token su stdout. Il tempo al primo token include l'avvio del processo e il prefill. La velocita successiva e calcolata sui 63 intervalli dopo il primo token. I campioni completi sono salvati in `build/generation-benchmark.json`.
+The benchmark observes the tokens on stdout. The time to first token includes process start-up and prefill. The subsequent speed is computed over the 63 intervals after the first token. All samples are saved to `build/generation-benchmark.json`.
 
-[Checkpoint e configurazione ufficiali](https://huggingface.co/LiquidAI/LFM2.5-350M/tree/main)
+[Official checkpoint and configuration](https://huggingface.co/LiquidAI/LFM2.5-350M/tree/main)

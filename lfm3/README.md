@@ -1,35 +1,37 @@
-# LFM3-1.7B: runtime e riferimento
+# LFM3-1.7B: runtime and reference
 
-Questa cartella aggiunge il supporto a LiquidAI LFM3-1.7B in formato GGUF Q4_K_M: un eseguibile Linux in assembly, `lfm3-next`, il riferimento numerico e le verifiche. Il runtime condivide con quello di LFM2.5 piattaforma, thread, tokenizer e chat; il kernel autonomo non lo supporta ancora.
+This directory holds the support for LiquidAI LFM3-1.7B in Q4_K_M GGUF format: the assembly runtime, as a Linux executable (`lfm3-next`) and as the standalone Pithos CORE kernel, the numerical reference and the verifications. The runtime shares the platform, threads, tokenizer, chat, engine and console with the LFM2.5 runtime.
 
-## Build e utilizzo
+[Italiano](README.it.md)
 
-Servono gli stessi strumenti della build principale, il GGUF e i file ufficiali del tokenizer. Su CPU senza AVX2, FMA e F16C il programma si ferma con un messaggio.
+## Build and usage
+
+The build needs the same tools as the main build, the GGUF and the official tokenizer files. On CPUs without AVX2, FMA and F16C the program stops with a message.
 
 ~~~sh
 make lfm3 LFM3_MODEL=LFM3-1.7B-Q4_K_M.gguf LFM3_TOKENIZER=/opt/lfm3-ref/tokenizer.json
-./build/lfm3/lfm3-next LFM3-1.7B-Q4_K_M.gguf --text 128 "Scrivi due frasi su Torino."
+./build/lfm3/lfm3-next LFM3-1.7B-Q4_K_M.gguf --text 128 "Write two sentences about Turin."
 ./build/lfm3/lfm3-next LFM3-1.7B-Q4_K_M.gguf --chat 256
 ~~~
 
-Le opzioni sono quelle di `lfm-next`: `--generate`, `--text`, `--chat`, `--encode`, `--decode`, `LFM_CONTEXT` e `LFM_THREADS`. Gli ID vanno da 0 a 127.999. `build/lfm3/tokenizer.bin`, di 12.519.600 byte, deve restare accanto all'eseguibile. Il prompt segue il template ufficiale con `enable_thinking=False`, che termina con un blocco di ragionamento vuoto `<think></think>`; anche i turni precedenti della chat lo conservano, come nel template.
+The options are those of `lfm-next`: `--generate`, `--text`, `--chat`, `--encode`, `--decode`, `LFM_CONTEXT` and `LFM_THREADS`. IDs range from 0 to 127,999. `build/lfm3/tokenizer.bin`, 12,519,600 bytes, must stay next to the executable. The prompt follows the official template with `enable_thinking=False`, which ends with an empty reasoning block `<think></think>`; earlier chat turns keep it as well, as in the template.
 
-I prodotti matrice-vettore e l'attenzione sono distribuiti fra i worker, e il prompt viene elaborato a blocchi di 15 token. Logit, generazione e trascrizioni della chat sono identici bit per bit fra 1 e 16 thread e fra prefill a blocchi e prefill token per token.
+The matrix-vector products and attention are distributed among the workers, and the prompt is processed in blocks of 15 tokens. Logits, generation and chat transcripts are bitwise identical between 1 and 16 threads and between block and token-by-token prefill.
 
-Misure del 27 novembre 2026 su Intel Core i5-10500H, WSL2 con quattro CPU visibili, prompt di 465 token e 64 token generati, mediane di tre ripetizioni. Il tempo del primo token include l'avvio del processo.
+Measured on 27 November 2026 on an Intel Core i5-10500H, WSL2 with four visible CPUs, a 465-token prompt and 64 generated tokens, medians of three repetitions. The first-token time includes process start-up.
 
-| Thread | Primo token | Prompt | Generazione |
+| Threads | First token | Prompt | Generation |
 | --- | --- | --- | --- |
-| 1, token per token | 38,04 s | 12 token/s | 9,91 token/s |
-| 1 | 19,67 s | 24 token/s | 9,79 token/s |
-| 2 | 11,82 s | 39 token/s | 16,37 token/s |
-| 4 | 7,95 s | 59 token/s | 17,77 token/s |
+| 1, token by token | 38.04 s | 12 tokens/s | 9.91 tokens/s |
+| 1 | 19.67 s | 24 tokens/s | 9.79 tokens/s |
+| 2 | 11.82 s | 39 tokens/s | 16.37 tokens/s |
+| 4 | 7.95 s | 59 tokens/s | 17.77 tokens/s |
 
-Sulla stessa macchina pithos su Windows, con `-t 4`, ha elaborato lo stesso prompt a 55,7-61,9 token/s, avvio escluso, e generato a 19,0-21,4 token/s; con sei thread 67-68 e 22 token/s. La generazione e limitata dalla banda di memoria: ogni token legge circa 1 GB di pesi.
+On the same machine pithos on Windows, with `-t 4`, processed the same prompt at 55.7-61.9 tokens/s, start-up excluded, and generated 19.0-21.4 tokens/s; with six threads 67-68 and 22 tokens/s. Generation is limited by memory bandwidth: each token reads about 1 GB of weights.
 
-## Pithos CORE: il kernel autonomo
+## Pithos CORE: the standalone kernel
 
-Lo stesso runtime si compila come kernel Multiboot, Pithos CORE, con piattaforma, avvio dei processori e console del kernel di LFM2.5. Il modulo di avvio contiene il GGUF e le tabelle del tokenizer senza conversione, 1.112.152.240 byte.
+The same runtime builds as a Multiboot kernel, Pithos CORE, with the platform, processor start-up and console of the standalone kernel. The boot module holds the GGUF and the tokenizer tables without conversion, 1,112,152,240 bytes.
 
 ~~~sh
 make lfm3-os LFM3_MODEL=LFM3-1.7B-Q4_K_M.gguf LFM3_TOKENIZER=/opt/lfm3-ref/tokenizer.json
@@ -38,76 +40,80 @@ make lfm3-os-image LFM3_MODEL=LFM3-1.7B-Q4_K_M.gguf LFM3_TOKENIZER=/opt/lfm3-ref
 python3 os/run.py --iso build/lfm3/pithos-core.iso --cpus 4 --display gtk
 ~~~
 
-L'immagine `build/lfm3/pithos-core.iso` avvia la chat con 256 token per risposta, contesto 4.096 e al massimo sei processori. Con 2 GiB di RAM restano circa 0,9 GiB per la cache, cioè circa 20.000 posizioni; il contesto di 32.768 posizioni richiede 3 GiB. Oltre ad AVX2 e FMA, i processori secondari devono offrire F16C; quelli che non lo offrono restano fermi.
+The `build/lfm3/pithos-core.iso` image starts the chat with 256 tokens per answer, a 4,096-position context and at most six processors. With 2 GiB of RAM about 0.9 GiB remains for the cache, about 20,000 positions; a 32,768-position context needs 3 GiB. Besides AVX2 and FMA, secondary processors must support F16C; those that do not stay parked.
 
-`make verify-lfm3-os` confronta il kernel in QEMU/KVM con l'eseguibile Linux: il bundle conserva GGUF e tabelle, cinque sequenze greedy e tre risposte testuali coincidono, la sequenza di 64 token coincide con 2, 3, 4 e 6 processori attivi, e tutti i 128.000 logit sono identici bit per bit con 1 e 4 processori. Sono verificati anche la chat seriale con cronologia, backspace, input non valido e `/clear`, la capacita esatta della cache, il rifiuto delle CPU senza AVX2, F16C o XSAVE, le opzioni non valide, il modulo mancante o corrotto e la RAM insufficiente.
+`make verify-lfm3-os` compares the kernel in QEMU/KVM with the Linux executable: the bundle preserves GGUF and tables, five greedy sequences and three text answers match, the 64-token sequence matches on 2, 3, 4 and 6 active processors, and all 128,000 logits are bitwise identical on 1 and 4 processors. It also checks the serial chat with history, backspace, invalid input and `/clear`, the exact cache capacity, the refusal of CPUs without AVX2, F16C or XSAVE, invalid options, a missing or corrupt module and insufficient RAM.
 
-### Console e opzioni
+### Console and options
 
-Con un framebuffer, cioe nell'avvio da ISO, Pithos CORE mostra un'interfaccia minimale con la palette dell'interfaccia web di pithos: un'intestazione con il marchio di Pithos di 24 pixel, il nome e il modello, la conversazione con un a capo per parola, e una barra di stato con velocita di generazione, velocita del prompt, tempo del primo token, contesto usato, decodifica, ragionamento, processori e layout di tastiera. I messaggi dell'utente iniziano con un segno ambra, le notifiche sono attenuate e il markdown `**grassetto**` appare in bianco pieno senza asterischi. La porta seriale riceve lo stesso testo con le stesse sequenze di colore ANSI. Senza framebuffer, nell'avvio diretto di QEMU, resta la console VGA testuale.
+![Sampling settings, an answer and the command list](../docs/screenshots/pithos-core-commands.png)
 
-I glifi vengono generati in fase di build da `os/ui_font.py`: DejaVu Sans Mono con antialiasing per latino, greco, cirillico e simboli, GNU Unifont per il resto del piano Unicode di base, compresi cinese, giapponese e coreano su due celle, e Noto Color Emoji a colori, ridotte a 16x16. Il file occupa 3,5 MB e contiene anche il marchio. Le sequenze di emoji composte si vedono come componenti separati, e arabo e scritture indiane appaiono senza legature e, per l'arabo, da sinistra a destra. Le licenze sono in `os/FONT-LICENSE.txt` e `os/CONSOLE-FONTS-LICENSE.txt`, copiate anche nell'immagine.
+With a framebuffer, that is when booting from the ISO, Pithos CORE shows a minimal interface in the palette of the pithos web interface: a header with the 24-pixel Pithos mark, the name and the model, the conversation with word wrapping, and a status line with generation speed, prompt speed, time to first token, context used, decoding, reasoning, processors and keyboard layout. User messages start with an amber mark, notices are dimmed, and markdown `**bold**` appears in bright white without asterisks. The serial port receives the same text with the same ANSI colour sequences. Without a framebuffer, in QEMU direct boot, the VGA text console remains.
 
-La tastiera segue tredici layout generati dai dati XKB con `ckbcomp` (`os/keymaps.py`, `make keymaps`): us, uk, it, de, fr, es, pt, br, ch, se, fi, no e dk, con Shift, AltGr, Caps Lock e tasti morti. Il layout si sceglie all'avvio con `keymap=it`, nell'immagine con `make lfm3-os-image LFM3_KEYMAP=it`, oppure durante la chat con `/keymap it`. In QEMU sono stati verificati i caratteri prodotti da it, fr, de, es, uk, pt, se, ch e us, compresi tasti morti, AltGr, `ß`, `ñ`, `å` e `£`.
+The glyphs are generated at build time by `os/ui_font.py`: antialiased DejaVu Sans Mono for Latin, Greek, Cyrillic and symbols, GNU Unifont for the rest of the Basic Multilingual Plane, including Chinese, Japanese and Korean on two cells, and Noto Color Emoji in colour, reduced to 16x16. The file takes 3.5 MB and also holds the mark. Composed emoji sequences show as separate components, and Arabic and Indic scripts appear without ligatures and, for Arabic, left to right. The licenses are in `os/FONT-LICENSE.txt` and `os/CONSOLE-FONTS-LICENSE.txt`, also copied into the image.
 
-I comandi della chat valgono anche nell'eseguibile Linux:
+The keyboard follows thirteen layouts generated from the XKB data with `ckbcomp` (`os/keymaps.py`, `make keymaps`): us, uk, it, de, fr, es, pt, br, ch, se, fi, no and dk, with Shift, AltGr, Caps Lock and dead keys. The layout is selected at boot with `keymap=it`, in the image with `make lfm3-os-image OS_KEYMAP=it`, or during the chat with `/keymap it`. In QEMU the characters produced by it, fr, de, es, uk, pt, se, ch and us were verified, including dead keys, AltGr, `ß`, `ñ`, `å` and `£`.
 
-| Comando | Effetto |
+The chat commands also work in the Linux executable:
+
+| Command | Effect |
 | --- | --- |
-| `/set temp 0.7` | campionamento con temperatura; 0 e la decodifica greedy predefinita |
-| `/set top-k 50`, `top-p 0.95`, `min-p 0.05`, `repeat 1.1`, `seed 42`, `tokens 256` | filtri dei candidati, penalita di ripetizione, seme e token per risposta |
-| `/think on`, `/think off` | ragionamento `<think>` prima della risposta |
-| `/think show`, `/think hide` | ragionamento attenuato oppure riassunto dal numero di token |
-| `/system TESTO` | system prompt; riavvia la conversazione |
-| `/stats`, `/set`, `/reset`, `/help` | statistiche, impostazioni, valori predefiniti, aiuto |
-| `/keymap it` | layout di tastiera, solo in Pithos CORE |
-| Esc | interrompe la risposta, solo in Pithos CORE |
+| `/set temp 0.7` | sampling with a temperature; 0 is the default greedy decoding |
+| `/set top-k 50`, `top-p 0.95`, `min-p 0.05`, `repeat 1.1`, `seed 42`, `tokens 256` | candidate filters, repetition penalty, seed and tokens per answer |
+| `/think on`, `/think off` | `<think>` reasoning before the answer |
+| `/think show`, `/think hide` | reasoning shown dim or summarised by its token count |
+| `/system TEXT` | system prompt; restarts the conversation |
+| `/stats`, `/set`, `/reset`, `/help` | statistics, settings, defaults, help |
+| `/keymap it` | keyboard layout, Pithos CORE only |
+| Esc | clears the line being typed or stops the answer, Pithos CORE only |
 
-Il campionamento segue l'ordine di llama.cpp: penalita di ripetizione sugli ultimi 64 token, i migliori `top-k` candidati, softmax con temperatura, `min-p` rispetto al candidato migliore, `top-p` e un'estrazione con xorshift64*. Con lo stesso seme le risposte si ripetono identiche, con `top-k 1` coincidono con la decodifica greedy. Con le impostazioni predefinite logit, generazione e risposte della chat restano identici bit per bit alla versione precedente. Il ragionamento resta nel contesto della conversazione, mentre il template ufficiale lo toglie dai turni passati.
+![Reasoning shown dim before the answer](../docs/screenshots/pithos-core-reasoning.png)
 
-## Implementazione
+Sampling follows the order of llama.cpp: repetition penalty over the last 64 tokens, the best `top-k` candidates, softmax with temperature, `min-p` relative to the best candidate, `top-p` and a draw from xorshift64*. With the same seed the answers repeat exactly, and with `top-k 1` they match greedy decoding. With the default settings, logits, generation and chat answers stay bitwise identical to the previous version. Reasoning stays in the conversation context, whereas the official template removes it from past turns.
 
-- `layout.py` legge il GGUF in fase di build, verifica metadati, forme e tipi di tutti i 287 tensori e genera offset, tipi e la sequenza degli strati presa dal checkpoint. L'eseguibile controlla all'avvio un hash FNV-1a dell'intestazione GGUF, 8.247.328 byte.
-- Ogni ingresso di matrice viene quantizzato una volta in Q8_K: blocchi da 256 valori con scala 127 / max |x| e arrotondamento al pari. I prodotti con le righe Q4_K e Q6_K sono interi, con `vpmaddubsw` e `vpmaddwd`, seguiti da una FMA per blocco, come nei kernel AVX2 di pithos e ggml. L'embedding condiviso Q6_K fornisce sia la riga di ingresso, dequantizzata nell'ordine di ggml, sia i 128.000 logit.
-- RMSNorm usa pesi F32, la convoluzione conserva sei campioni di storia per canale, e la sandwich norm normalizza l'uscita di ogni blocco prima del residuo.
-- L'attenzione calcola norma e RoPE per testa, con le frequenze FP32 generate da `modeling_lfm3.py` in `frequencies.inc`; negli strati ad attenzione piena ruotano le prime 32 coppie. Ogni testa legge la testa KV h / 4, gli strati a finestra le ultime 256 posizioni, e l'uscita viene moltiplicata per il gate sigmoid della testa. La cache KV FP32 occupa 44 KiB per posizione.
-- I worker ricevono righe intere delle matrici, o teste intere dell'attenzione con una propria riga di punteggi, tramite il meccanismo `job_entry` condiviso con LFM2.5. Nel prefill a blocchi ogni blocco di pesi Q4_K o Q6_K viene spacchettato una volta e riusato per tutti i token; per ogni coppia (riga, token) somme intere, FMA per blocco e riduzioni finali sono quelle del kernel a un token. Norme, convoluzione, RoPE e attenzione avanzano un token alla volta, e le key e i valori del blocco vengono scritti in cache prima dell'attenzione. La build diagnostica `lfm3-layers` elabora il prompt token per token per conservare l'ordine dei dump.
-- `build_tokenizer.py` accetta `--vocab` e `--hash-bits` e, per i tokenizer con `ignore_merges`, aggiunge una tabella da sequenza di byte a ID; `tokenizer.asm` cerca prima il pezzo intero. Con i valori predefiniti le tabelle di LFM2.5 restano identiche byte per byte, e anche codice e dati caricati degli eseguibili LFM2.5 e del kernel coincidono con la versione precedente.
+## Implementation
 
-## Verifica
+- `layout.py` reads the GGUF at build time, checks the metadata, shapes and types of all 287 tensors and emits the offsets, types and layer sequence taken from the checkpoint. The executable checks an FNV-1a hash of the GGUF header, 8,247,328 bytes, at start-up.
+- Every matrix input is quantized once to Q8_K: blocks of 256 values with a 127 / max |x| scale and round-half-to-even. The products with the Q4_K and Q6_K rows are integer, with `vpmaddubsw` and `vpmaddwd`, followed by one FMA per block, as in the AVX2 kernels of pithos and ggml. The shared Q6_K embedding provides both the input row, dequantized in ggml's order, and the 128,000 logits.
+- RMSNorm uses F32 weights, the convolution keeps six history samples per channel, and the sandwich norm normalizes the output of every block before the residual.
+- Attention computes the norm and RoPE per head, with the FP32 frequencies generated from `modeling_lfm3.py` in `frequencies.inc`; full-attention layers rotate the first 32 pairs. Each head reads KV head h / 4, sliding-window layers the last 256 positions, and the output is multiplied by the head's sigmoid gate. The FP32 KV cache takes 44 KiB per position.
+- The workers receive whole matrix rows, or whole attention heads with their own score row, through the `job_entry` mechanism shared with LFM2.5. In the block prefill each Q4_K or Q6_K weight block is unpacked once and reused for every token; for each (row, token) pair the integer sums, the per-block FMA and the final reductions are those of the single-token kernel. Norms, convolution, RoPE and attention advance one token at a time, and the keys and values of the block are written to the cache before attention. The diagnostic `lfm3-layers` build processes the prompt token by token to keep the order of the dumps.
+- `build_tokenizer.py` accepts `--vocab` and `--hash-bits` and, for tokenizers with `ignore_merges`, adds a table from byte sequences to IDs; `tokenizer.asm` looks up the whole piece first. With the default values the LFM2.5 tables stay byte-identical.
+
+## Verification
 
 ~~~sh
 make verify-lfm3-tokenizer LFM3_TOKENIZER=/opt/lfm3-ref/tokenizer.json
 make verify-lfm3 LFM3_MODEL=LFM3-1.7B-Q4_K_M.gguf LFM3_TOKENIZER=/opt/lfm3-ref/tokenizer.json LFM3_REF=/opt/lfm3-ref
 ~~~
 
-Il tokenizer coincide con quello ufficiale su 62 testi, fra cui italiano, cinese, giapponese, coreano, arabo, hindi, thai, emoji, codice e token speciali, e nella decodifica di tutti i 128.000 ID in gruppi da 2.000.
+The tokenizer matches the official one on 62 texts, including Italian, Chinese, Japanese, Korean, Arabic, Hindi, Thai, emoji, code and special tokens, and in decoding all 128,000 IDs in groups of 2,000.
 
-Per il modello un confronto bit per bit non e possibile. L'arrotondamento Q8_K e discontinuo: un valore al confine fra due livelli si sposta di un passo intero per una differenza di un ulp a monte, e questi casi si amplificano nei 24 strati, fino a circa un logit sui logit finali. Riguarda qualunque motore con attivazioni Q8_K, compresi ggml e pithos. `verify.py` controlla quindi tre aspetti.
+A bitwise comparison of the model is not possible. Q8_K rounding is discontinuous: a value on the boundary between two levels moves by a whole step for a one-ulp difference upstream, and such cases grow through the 24 layers, up to about one logit in the final logits. This applies to any engine with Q8_K activations, ggml and pithos included. `verify.py` therefore checks three things.
 
-- Replay dei blocchi: la build diagnostica `lfm3-layers` scrive l'embedding e l'uscita normalizzata di ogni blocco per ogni token. Ogni blocco del riferimento, con gli stessi ingressi Q8_K, viene eseguito sugli stati del runtime per tutti i token, con le maschere causali e a finestra e le RoPE del forward ufficiale, e deve riprodurre l'uscita del runtime. Un arrotondamento al confine resta locale, a un token o ai token che leggono la key e il valore cambiati; un difetto colpirebbe la maggior parte dei token. La mediana di ogni blocco deve restare entro 1e-5 relativo, e la quota di coppie (token, blocco) oltre questa soglia viene confrontata con quella del riferimento contro se stesso, quando i suoi ingressi si spostano di un ulp.
-- Riferimento FP32: l'argmax dei logit finali deve coincidere.
-- Generazione: dopo un prompt di 463 token, ogni token greedy deve essere l'argmax del riferimento FP32, salvo quasi pareggi entro 0,25 logit.
+- Block replay: the diagnostic `lfm3-layers` build writes the embedding and the normalized output of every block for every token. Each reference block, with the same Q8_K inputs, runs on the runtime's states for all tokens, with the causal and sliding-window masks and the RoPE of the official forward pass, and must reproduce the runtime's output. A rounding flip stays local, to one token or to the tokens that read the changed key and value; a defect would affect most tokens. The median of every block must stay within 1e-5 relative, and the share of (token, block) pairs above that level is compared with that of the reference against itself when its inputs move by one ulp.
+- FP32 reference: the argmax of the final logits must match.
+- Generation: after a 463-token prompt, every greedy token must be the FP32 reference argmax, except at near ties within 0.25 logits.
 
-Risultati del 26 novembre 2026:
+Results of 26 November 2026:
 
-| Controllo | Risultato |
+| Check | Result |
 | --- | --- |
-| Replay, 20 token x 48 blocchi | mediana peggiore 1,2e-6; oltre 1e-5 il 3,23% delle coppie, contro il 3,85% del riferimento con se stesso |
-| Replay, 463 token x 48 blocchi | mediana peggiore 1,6e-6; oltre 1e-5 il 4,72%, contro l'8,75% |
-| Controllo negativo: finestra di 255 posizioni | mediana 9,3e-5 nello strato 12 a finestra: respinto |
-| Argmax FP32, prompt da 1, 20, 463 e 721 token | 4 su 4; differenza massima sui logit fra 0,20 e 1,48 |
-| Generazione greedy, 96 token | 95 argmax del riferimento; l'unico scostamento e un quasi pareggio di 0,018 logit |
+| Replay, 20 tokens x 48 blocks | worst median 1.2e-6; 3.23% of pairs above 1e-5, against 3.85% for the reference with itself |
+| Replay, 463 tokens x 48 blocks | worst median 1.6e-6; 4.72% above 1e-5, against 8.75% |
+| Negative control: 255-position window | median 9.3e-5 in sliding-window layer 12: rejected |
+| FP32 argmax, prompts of 1, 20, 463 and 721 tokens | 4 of 4; largest logit difference between 0.20 and 1.48 |
+| Greedy generation, 96 tokens | 95 reference argmax; the only miss is a near tie of 0.018 logits |
 
-Con un solo token, ogni blocco coincide con il riferimento entro 1e-7-1e-6 relativo, salvo due MLP con un arrotondamento al confine a 3e-5. La risposta a `What is the capital of France?` coincide token per token con il riferimento e con pithos.
+With a single token, every block matches the reference within 1e-7 to 1e-6 relative, except two MLPs with a boundary rounding at 3e-5. The answer to `What is the capital of France?` matches the reference and pithos token for token.
 
-Con il template ufficiale il modello Q4_K_M a volte chiude un ragionamento inesistente e ripete la risposta, ad esempio `Il colore azzurro.</think>Il colore azzurro.`; tutti i 14 token sono l'argmax del riferimento FP32, quindi il comportamento appartiene al modello. La chat scrive le risposte su stdout e le etichette su stderr. Leggendo i due flussi da pipe separate, come fa un terminale remoto o uno strumento che li riassembla a blocchi, un messaggio di stato puo inserirsi fra i byte di un carattere UTF-8 e apparire come U+FFFD. Con lo stesso input e i flussi su file, separati o uniti, l'uscita e UTF-8 valido senza caratteri di sostituzione.
+With the official template the Q4_K_M model sometimes closes a reasoning block that does not exist and repeats the answer, for example `Il colore azzurro.</think>Il colore azzurro.`; all 14 tokens are the FP32 reference argmax, so the behaviour belongs to the model. The engine treats a `</think>` outside reasoning as the end of the answer, and the repetition is not written. The chat writes answers on stdout and labels on stderr. When the two streams are read from separate pipes, as a remote terminal or a tool that reassembles them in chunks does, a status message can land between the bytes of a UTF-8 character and appear as U+FFFD. With the same input and the streams in files, separate or merged, the output is valid UTF-8 without replacement characters.
 
-## Riferimento FP32
+## FP32 reference
 
-`reference.py` costruisce l'architettura ufficiale `Lfm3ForCausalLM` dal codice `modeling_lfm3.py` del repository Hugging Face, senza allocarne i pesi. Ogni `Linear` e l'embedding dequantizzano il proprio tensore GGUF quando vengono chiamati, con i dequantizzatori del pacchetto `gguf` di llama.cpp, quindi in memoria resta una sola matrice alla volta e il modello gira in circa 2 GiB. Norme e coefficienti delle convoluzioni sono gia F32 nel GGUF. Il calcolo e in FP32 con attenzione eager.
+`reference.py` builds the official `Lfm3ForCausalLM` architecture from the `modeling_lfm3.py` code of the Hugging Face repository without allocating its weights. Every `Linear` and the embedding dequantize their GGUF tensor when called, with the dequantizers of llama.cpp's `gguf` package, so only one matrix is resident at a time and the model runs in about 2 GiB. Norms and convolution taps are already F32 in the GGUF. The computation is FP32 with eager attention.
 
-Al caricamento lo script verifica che i metadati del GGUF coincidano con `config.json`: strati, dimensioni, teste, finestra, basi RoPE, kernel della convoluzione, token speciali e l'equivalenza fra `rope_freqs` e la rotazione parziale. Controlla anche che tutti i 287 tensori siano assegnati e che nessun parametro resti senza pesi.
+On loading, the script checks that the GGUF metadata match `config.json`: layers, dimensions, heads, window, RoPE bases, convolution kernel, special tokens and the equivalence between `rope_freqs` and partial rotation. It also checks that all 287 tensors are assigned and that no parameter is left without weights.
 
 ~~~sh
 hf download LiquidAI/LFM3-1.7B config.json configuration_lfm3.py modeling_lfm3.py lfm3_conv.py tokenizer.json tokenizer_config.json chat_template.jinja special_tokens_map.json generation_config.json --local-dir /opt/lfm3-ref
@@ -116,49 +122,49 @@ python lfm3/reference.py MODEL.gguf /opt/lfm3-ref logits out.f32 ID ...
 python lfm3/reference.py MODEL.gguf /opt/lfm3-ref teacher P ID ...
 ~~~
 
-Servono PyTorch, Transformers 5, `gguf` e `accelerate`. Ogni passaggio dequantizza l'intero checkpoint, circa 15-20 secondi su questa macchina, quindi la generazione token per token e lenta. `teacher` verifica invece l'output di un altro motore con un solo passaggio: i primi P ID sono il prompt, gli altri la continuazione greedy, e ogni token della continuazione deve essere l'argmax del riferimento. Per gli scostamenti stampa la distanza in logit dal massimo.
+It needs PyTorch, Transformers 5, `gguf` and `accelerate`. Each pass dequantizes the whole checkpoint, about 15-20 seconds on this machine, so token-by-token generation is slow. `teacher` instead checks another engine's output in a single pass: the first P IDs are the prompt, the rest its greedy continuation, and every continuation token must be the reference argmax. For misses it prints the logit distance from the maximum.
 
-## Verifiche del riferimento
+## Reference checks
 
-- Il GGUF corrisponde a `config.json` e tutti i tensori si mappano sull'architettura ufficiale.
-- Il tokenizer ufficiale e quello di pithos producono gli stessi 20 ID per il prompt di prova.
-- Con `What is the capital of France?` e ragionamento disattivato, riferimento e pithos generano gli stessi nove token, EOS incluso: `The capital of France is **Paris**.`
-- Con un prompt italiano di 465 token, oltre la finestra di 256 posizioni, 89 dei 92 token generati da pithos sono l'argmax del riferimento. I tre scostamenti sono quasi pareggi, con distanze di 0,215, 0,087 e 0,008 logit, coerenti con la quantizzazione Q8_K delle attivazioni e la cache FP16 di pithos.
+- The GGUF matches `config.json` and all tensors map onto the official architecture.
+- The official tokenizer and pithos produce the same 20 IDs for the test prompt.
+- With `What is the capital of France?` and reasoning off, the reference and pithos generate the same nine tokens, EOS included: `The capital of France is **Paris**.`
+- With a 465-token Italian prompt, beyond the 256-position window, 89 of the 92 tokens generated by pithos are the reference argmax. The three misses are near ties, at distances of 0.215, 0.087 and 0.008 logits, consistent with the Q8_K quantization of activations and the FP16 cache of pithos.
 
-pithos e stato eseguito con `--cpu --no-cache --reasoning off --temp 0 --repeat-penalty 1.0 --ids`. Il suo prompt senza ragionamento termina con `<think>\n</think>\n`, mentre il template ufficiale con `enable_thinking=False` produce `<think></think>`; i confronti usano lo stesso testo per entrambi i motori.
+pithos was run with `--cpu --no-cache --reasoning off --temp 0 --repeat-penalty 1.0 --ids`. Its prompt without reasoning ends with `<think>\n</think>\n`, whereas the official template with `enable_thinking=False` produces `<think></think>`; the comparisons use the same text for both engines.
 
-## Differenze rispetto a LFM2.5-350M
+## Differences from LFM2.5-350M
 
 | | LFM2.5-350M | LFM3-1.7B |
 | --- | --- | --- |
-| Strati | 16: 10 convoluzioni, 6 attenzione | 24: 13 convoluzioni, 6 attenzione piena, 5 a finestra di 256 |
-| Dimensione e MLP | 1024, 4608 | 2048, 7680 |
-| Teste | 16 query, 8 KV, dimensione 64 | 16 query, 4 KV, dimensione 128 |
-| Convoluzione | 3 coefficienti | 7 coefficienti, sei campioni di storia |
-| Pesi | BF16, 709 MB | Q4_K e Q6_K, 1,1 GB; embedding condiviso Q6_K |
-| Vocabolario | 65.536 | 128.000 righe, ID usati fino a 125.032 |
+| Layers | 16: 10 convolution, 6 attention | 24: 13 convolution, 6 full attention, 5 with a 256-position window |
+| Width and MLP | 1024, 4608 | 2048, 7680 |
+| Heads | 16 query, 8 KV, dimension 64 | 16 query, 4 KV, dimension 128 |
+| Convolution | 3 taps | 7 taps, six history samples |
+| Weights | BF16, 709 MB | Q4_K and Q6_K, 1.1 GB; shared Q6_K embedding |
+| Vocabulary | 65,536 | 128,000 rows, IDs used up to 125,032 |
 
-Componenti nuovi, tutti presenti nel codice ufficiale:
+New components, all present in the official code:
 
-- sandwich norm: un RMSNorm sull'uscita del blocco di convoluzione o attenzione e uno sull'uscita dell'MLP, prima di ciascun residuo;
-- un gate per testa: `sigmoid(gate_proj(x))`, calcolato dall'ingresso normalizzato dell'attenzione, moltiplica l'uscita della testa;
-- negli strati ad attenzione piena la RoPE ruota solo le prime 32 coppie, con base 1e6 e le frequenze della dimensione intera; le altre 32 restano ferme. Gli strati a finestra ruotano tutte le 64 coppie con base 1e4. Le coppie sono (i, i+64), come nella versione attuale;
-- negli strati a finestra ogni token vede le ultime 256 posizioni, la propria inclusa;
-- il template avvia il ragionamento `<think>` per impostazione predefinita.
+- sandwich norm: one RMSNorm on the output of the convolution or attention block and one on the output of the MLP, before each residual;
+- a per-head gate: `sigmoid(gate_proj(x))`, computed from the normalized attention input, multiplies the head's output;
+- in full-attention layers RoPE rotates only the first 32 pairs, with base 1e6 and the frequencies of the full dimension; the other 32 stay fixed. Sliding-window layers rotate all 64 pairs with base 1e4. The pairs are (i, i+64), as in LFM2.5;
+- in sliding-window layers each token sees the last 256 positions, its own included;
+- the template starts `<think>` reasoning by default.
 
 ## Tokenizer
 
-La regex di pre-tokenizzazione e la stessa di LFM2, quindi la suddivisione Unicode di `tokenizer.asm` resta valida. Cambiano quattro aspetti:
+The pre-tokenization regex is the same as LFM2's, so the Unicode splitting of `tokenizer.asm` still applies. Four aspects change:
 
-- `ignore_merges` e attivo: un pezzo presente intero nel vocabolario si emette direttamente, senza merge. Serve una tabella da sequenza di byte a ID;
-- i merge sono 293.320, oltre la tabella hash attuale da 131.072 posizioni;
-- gli ID superano 65.535;
-- il token piu lungo occupa 386 byte, oltre il buffer di decodifica da 128.
+- `ignore_merges` is enabled: a piece found whole in the vocabulary is emitted directly, without merges. This needs a table from byte sequences to IDs;
+- there are 293,320 merges, more than the former hash table of 131,072 slots;
+- IDs exceed 65,535;
+- the longest token takes 386 bytes, more than the former 128-byte decoding buffer.
 
-## Kernel quantizzati
+## Quantized kernels
 
-Il motore C pithos (`src/quant_avx2.c`) e il riferimento per i kernel. Le attivazioni di ogni riga vengono quantizzate in Q8_K: blocchi da 256 valori int8 con una scala e sedici somme parziali. I prodotti Q4_K e Q6_K sono interi, con `vpmaddubsw` e `vpmaddwd`, e una sola FMA in virgola mobile per blocco. Le correzioni dei minimi Q4_K e dell'offset -32 di Q6_K usano le somme parziali. Le varianti a piu token spacchettano ogni blocco di pesi una volta e lo riusano per tutti i token, come il prefill a blocchi attuale.
+The pithos C engine (`src/quant_avx2.c`) is the reference for the kernels. The activations of each row are quantized to Q8_K: blocks of 256 int8 values with one scale and sixteen partial sums. The Q4_K and Q6_K products are integer, with `vpmaddubsw` and `vpmaddwd`, and a single floating-point FMA per block. The corrections for the Q4_K minimums and the Q6_K -32 offset use the partial sums. The multi-token variants unpack each weight block once and reuse it for every token, like the block prefill.
 
-## Memoria
+## Memory
 
-Con cache KV in FP32, gli 11 strati di attenzione occupano 44 KiB per posizione; con un anello di 256 posizioni per i cinque strati a finestra si scende a circa 24 KiB. Il checkpoint di 1,1 GB rientra nella RAM sotto 4 GiB usata dal kernel autonomo.
+With an FP32 KV cache, the 11 attention layers take 44 KiB per position; a 256-position ring for the five sliding-window layers would bring this down to about 24 KiB. The 1.1 GB checkpoint fits the RAM below 4 GiB used by the standalone kernel.
