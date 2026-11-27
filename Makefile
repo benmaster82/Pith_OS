@@ -17,13 +17,13 @@ build/layout.inc: FORCE layout.py | build
 	cmp -s $@.tmp $@ || cp $@.tmp $@
 	rm -f $@.tmp
 
-build/main.o: main.asm platform_linux.asm kernels.asm attention.asm threads.asm tokenizer.asm chat.asm layers.inc frequencies.inc build/layout.inc build/tokenizer.inc
+build/main.o: main.asm platform_linux.asm kernels.asm attention.asm engine.asm util.asm expmath.asm expmath_data.inc threads.asm tokenizer.asm chat.asm layers.inc frequencies.inc build/layout.inc build/tokenizer.inc
 	$(NASM) -f elf64 -Ibuild/ main.asm -o $@
 
 build/lfm-next: build/main.o build/tokenizer.bin
 	$(LD) -static -z noexecstack -o $@ $<
 
-build/logits.o: main.asm platform_linux.asm kernels.asm attention.asm threads.asm tokenizer.asm chat.asm layers.inc frequencies.inc build/layout.inc build/tokenizer.inc
+build/logits.o: main.asm platform_linux.asm kernels.asm attention.asm engine.asm util.asm expmath.asm expmath_data.inc threads.asm tokenizer.asm chat.asm layers.inc frequencies.inc build/layout.inc build/tokenizer.inc
 	$(NASM) -f elf64 -DDUMP_LOGITS -Ibuild/ main.asm -o $@
 
 build/lfm-logits: build/logits.o
@@ -32,7 +32,7 @@ build/lfm-logits: build/logits.o
 verify: build/lfm-next build/lfm-logits
 	$(PYTHON) verify.py "$(MODEL)" build/lfm-next build/lfm-logits
 
-build/scalar.o: main.asm platform_linux.asm kernels.asm attention.asm threads.asm tokenizer.asm chat.asm layers.inc frequencies.inc build/layout.inc build/tokenizer.inc
+build/scalar.o: main.asm platform_linux.asm kernels.asm attention.asm engine.asm util.asm expmath.asm expmath_data.inc threads.asm tokenizer.asm chat.asm layers.inc frequencies.inc build/layout.inc build/tokenizer.inc
 	$(NASM) -f elf64 -DFORCE_SCALAR -Ibuild/ main.asm -o $@
 
 build/lfm-scalar: build/scalar.o build/tokenizer.bin
@@ -72,8 +72,11 @@ os: build/lfm-os.elf $(OS_BUNDLE)
 
 os-image: $(OS_IMAGE)
 
-$(OS_IMAGE): build/lfm-os.elf $(OS_BUNDLE) os/image.py os/FONT-LICENSE.txt
-	$(PYTHON) os/image.py build/lfm-os.elf "$(OS_BUNDLE)" "$(OS_IMAGE)"
+OS_KEYMAP ?= us
+$(OS_IMAGE): build/lfm-os.elf $(OS_BUNDLE) os/image.py os/FONT-LICENSE.txt os/CONSOLE-FONTS-LICENSE.txt
+	$(PYTHON) os/image.py build/lfm-os.elf "$(OS_BUNDLE)" "$(OS_IMAGE)" --title "Pithos CORE LFM2.5-350M" \
+		--license os/CONSOLE-FONTS-LICENSE.txt \
+		--options "mode=chat tokens=64 context=2048 threads=6 keymap=$(OS_KEYMAP)"
 
 os-run: os
 	$(PYTHON) os/run.py "$(OS_BUNDLE)"
@@ -98,7 +101,7 @@ build/os-boot.o: os/boot.asm | build
 build/console-font.bin: os/font.py | build
 	$(FONT_PYTHON) os/font.py $@
 
-build/os-main.o: main.asm os/platform.asm os/multiboot.asm os/smp.asm os/console.asm kernels.asm attention.asm tokenizer.asm chat.asm layers.inc frequencies.inc build/layout.inc build/tokenizer.inc build/boot_bundle.inc build/console-font.bin
+build/os-main.o: main.asm os/platform.asm os/multiboot.asm os/smp.asm os/ui.asm os/keymaps.inc kernels.asm attention.asm engine.asm util.asm expmath.asm expmath_data.inc tokenizer.asm chat.asm layers.inc frequencies.inc build/layout.inc build/tokenizer.inc build/boot_bundle.inc build/pithos-font.bin
 	$(NASM) -f elf64 -DBARE_METAL -Ibuild/ main.asm -o $@
 
 build/lfm-os.elf64: build/os-boot.o build/os-main.o os/linker.ld
@@ -107,7 +110,7 @@ build/lfm-os.elf64: build/os-boot.o build/os-main.o os/linker.ld
 build/lfm-os.elf: build/lfm-os.elf64
 	objcopy -O elf32-i386 $< $@
 
-build/os-logits.o: main.asm os/platform.asm os/multiboot.asm os/smp.asm os/console.asm kernels.asm attention.asm tokenizer.asm chat.asm layers.inc frequencies.inc build/layout.inc build/tokenizer.inc build/boot_bundle.inc build/console-font.bin
+build/os-logits.o: main.asm os/platform.asm os/multiboot.asm os/smp.asm os/ui.asm os/keymaps.inc kernels.asm attention.asm engine.asm util.asm expmath.asm expmath_data.inc tokenizer.asm chat.asm layers.inc frequencies.inc build/layout.inc build/tokenizer.inc build/boot_bundle.inc build/pithos-font.bin
 	$(NASM) -f elf64 -DBARE_METAL -DDUMP_LOGITS -Ibuild/ main.asm -o $@
 
 build/lfm-os-logits.elf64: build/os-boot.o build/os-logits.o os/linker.ld
@@ -119,7 +122,7 @@ build/lfm-os-logits.elf: build/lfm-os-logits.elf64
 # LFM3-1.7B GGUF runtime. The tokenizer tables sit beside the executable.
 LFM3_MODEL ?= LFM3-1.7B-Q4_K_M.gguf
 LFM3_TOKENIZER ?= lfm3-ref/tokenizer.json
-LFM3_SOURCES = lfm3/main.asm lfm3/kernels.asm lfm3/engine.asm lfm3/frequencies.inc platform_linux.asm threads.asm \
+LFM3_SOURCES = lfm3/main.asm lfm3/kernels.asm engine.asm lfm3/frequencies.inc platform_linux.asm threads.asm \
 	tokenizer.asm chat.asm util.asm expmath.asm expmath_data.inc \
 	build/lfm3/layout.inc build/lfm3/lfm3-layers.inc build/lfm3/tokenizer.inc
 .PHONY: lfm3
@@ -202,7 +205,7 @@ build/lfm3/lfm3-os-logits.elf64: build/os-boot.o build/lfm3/os-logits.o os/linke
 build/lfm3/%.elf: build/lfm3/%.elf64
 	objcopy -O elf32-i386 $< $@
 
-LFM3_KEYMAP ?= us
+LFM3_KEYMAP ?= $(OS_KEYMAP)
 $(LFM3_OS_IMAGE): build/lfm3/lfm3-os.elf $(LFM3_BUNDLE) os/image.py os/FONT-LICENSE.txt os/CONSOLE-FONTS-LICENSE.txt
 	$(PYTHON) os/image.py build/lfm3/lfm3-os.elf "$(LFM3_BUNDLE)" "$(LFM3_OS_IMAGE)" --title "Pithos CORE" \
 		--license os/CONSOLE-FONTS-LICENSE.txt \

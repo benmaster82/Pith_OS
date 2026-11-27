@@ -17,6 +17,7 @@ default abs
 %define PREFILL_BLOCK 15            ; prompt tokens per weight pass
 %endif
 %define ENGINE_HOOKS                ; sampling, reasoning, system prompt, commands
+%define VOCAB_SIZE 128000
 %define CHAT_BANNER "Chat ready. /help lists the commands, /quit exits."
 section .text
 %ifdef BARE_METAL
@@ -496,7 +497,7 @@ block_residual:
     ret
 
 %include "lfm3/kernels.asm"
-%include "lfm3/engine.asm"
+%include "engine.asm"
 %include "expmath.asm"
 %ifdef BARE_METAL
 %include "os/smp.asm"

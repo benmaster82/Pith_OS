@@ -1,10 +1,74 @@
-# Pith_OS
+# Pithos CORE
 
-Inferenza LiquidAI LFM2.5-350M in NASM x86-64, su Linux e come kernel autonomo.
+Inferenza di modelli LiquidAI in NASM x86-64, su Linux e come sistema operativo autonomo.
 
-Prototipo di inferenza x86-64, interamente in assembly, per i pesi BF16 ufficiali di LiquidAI/LFM2.5-350M. Comprende un eseguibile Linux e un kernel autonomo con avvio BIOS/UEFI, fino a 16 CPU, console video e seriale. Entrambi condividono tokenizer BPE, inferenza AVX2/FMA con fallback scalare e accumulazioni FP32. Linux carica i pesi con mmap e usa thread persistenti; il kernel riceve pesi e tokenizer dal bootloader e avvia i propri worker. Il runtime non richiede libc o Python. Progetto indipendente, ispirato a llm.asm, non un fork.
+Pithos CORE esegue LiquidAI LFM3-1.7B, il modello principale, dal GGUF Q4_K_M, e LFM2.5-350M, il modello compatto, dai pesi BF16 ufficiali. Ogni modello ha un eseguibile Linux e un kernel autonomo con avvio BIOS/UEFI da CD o chiavetta USB, fino a 16 CPU, console grafica Unicode e porta seriale. Tokenizer BPE, prodotti AVX2/FMA, worker paralleli, prefill a blocchi, campionamento e comandi della chat sono condivisi. Il runtime non richiede libc o Python. Progetto indipendente, ispirato a llm.asm, non un fork.
 
-## Build e utilizzo
+## LFM3-1.7B: il modello principale
+
+Il runtime quantizza ogni ingresso di matrice in Q8_K e calcola prodotti interi con le righe Q4_K e Q6_K del GGUF, come ggml. Gestisce sandwich norm, convoluzioni a sette coefficienti, attenzione con finestra di 256 posizioni, RoPE parziale e gate per testa. Le risposte coincidono con un riferimento FP32 costruito sul codice ufficiale `modeling_lfm3.py`; i dettagli sono in [lfm3/README.md](lfm3/README.md).
+
+### Build e utilizzo
+
+Servono NASM, GNU ld, GNU make 4.3 o successivo e Python 3 con il pacchetto tokenizers. Il GGUF e i file del tokenizer ufficiale si scaricano da Hugging Face.
+
+~~~sh
+hf download LiquidAI/LFM3-1.7B-GGUF LFM3-1.7B-Q4_K_M.gguf --local-dir weights
+hf download LiquidAI/LFM3-1.7B tokenizer.json tokenizer_config.json chat_template.jinja --local-dir lfm3-ref
+make lfm3 LFM3_MODEL=weights/LFM3-1.7B-Q4_K_M.gguf LFM3_TOKENIZER=lfm3-ref/tokenizer.json
+./build/lfm3/lfm3-next weights/LFM3-1.7B-Q4_K_M.gguf --chat 256
+./build/lfm3/lfm3-next weights/LFM3-1.7B-Q4_K_M.gguf --text 128 "Scrivi due frasi su Torino."
+~~~
+
+Le opzioni sono `--chat [N]`, `--text N "prompt"`, `--generate N ID ...`, `--encode` e `--decode`; `LFM_THREADS` sceglie da 1 a 16 thread e `LFM_CONTEXT` da 1 a 32.768 posizioni. Le tabelle `build/lfm3/tokenizer.bin` devono restare accanto all'eseguibile.
+
+### Pithos CORE in QEMU, da CD o da USB
+
+~~~sh
+make lfm3-os-image LFM3_MODEL=weights/LFM3-1.7B-Q4_K_M.gguf LFM3_TOKENIZER=lfm3-ref/tokenizer.json OS_KEYMAP=it
+python3 os/run.py --iso build/lfm3/pithos-core.iso --cpus 4 --display gtk
+python3 os/run.py --iso build/lfm3/pithos-core.iso --uefi --usb --cpus 4 --display gtk
+~~~
+
+`build/lfm3/pithos-core.iso`, circa 1,13 GB, e un'immagine ibrida GRUB per BIOS e UEFI, scrivibile come immagine raw su una chiavetta. Contiene kernel, GGUF invariato e tabelle del tokenizer; dopo l'avvio il kernel lavora interamente in RAM. L'immagine apre la chat con 256 token per risposta, contesto 4.096 e fino a sei CPU; `OS_KEYMAP` sceglie il layout di tastiera predefinito. Servono 2 GiB di RAM sotto i 4 GiB e una CPU con AVX2, FMA e F16C; Secure Boot va disattivato.
+
+### Console e comandi
+
+La console mostra il marchio di Pithos, il modello, la conversazione con a capo per parola e una barra di stato con velocita di generazione e del prompt, tempo del primo token, contesto, decodifica, ragionamento, processori e layout. Cinese, giapponese, coreano ed emoji a colori sono visibili sullo schermo; la tastiera segue tredici layout (us, uk, it, de, fr, es, pt, br, ch, se, fi, no, dk) con AltGr, Caps Lock e tasti morti.
+
+| Comando | Effetto |
+| --- | --- |
+| `/set temp 0.7` | campionamento con temperatura; 0 e la decodifica greedy predefinita |
+| `/set top-k 50`, `top-p 0.95`, `min-p 0.05`, `repeat 1.1`, `seed 42`, `tokens 256` | filtri, penalita di ripetizione, seme e token per risposta |
+| `/think on`, `/think off`, `/think show`, `/think hide` | ragionamento prima della risposta, visibile o riassunto |
+| `/system TESTO` | system prompt; riavvia la conversazione |
+| `/stats`, `/set`, `/reset`, `/help`, `/clear`, `/quit` | statistiche, impostazioni, valori predefiniti, aiuto, nuova conversazione, uscita |
+| `/keymap it`, Esc | layout di tastiera; Esc cancella la riga o interrompe la risposta (solo nel kernel) |
+
+### Prestazioni
+
+Misure del 27 novembre 2026 su Intel Core i5-10500H, WSL2 con quattro CPU visibili, prompt di 465 token e 64 token generati.
+
+| Thread | Primo token | Prompt | Generazione |
+| --- | --- | --- | --- |
+| 1 | 19,67 s | 24 token/s | 9,79 token/s |
+| 4 | 7,95 s | 59 token/s | 17,77 token/s |
+
+Sulla stessa macchina il motore C pithos, con quattro thread su Windows, ha elaborato lo stesso prompt a 56-62 token/s e generato a 19-21 token/s.
+
+### Verifica
+
+~~~sh
+make verify-lfm3 verify-lfm3-tokenizer verify-lfm3-os LFM3_MODEL=weights/LFM3-1.7B-Q4_K_M.gguf LFM3_TOKENIZER=lfm3-ref/tokenizer.json LFM3_REF=lfm3-ref
+~~~
+
+Il tokenizer coincide con quello ufficiale su 62 testi e su tutti i 128.000 ID. Ogni blocco del modello riproduce il riferimento FP32 con gli stessi ingressi Q8_K, l'argmax finale coincide su prompt fino a 721 token e le risposte greedy sono l'argmax del riferimento salvo quasi pareggi. Logit e risposte sono identici bit per bit fra 1 e 16 thread, fra prefill a blocchi e token per token, e fra Linux e kernel con 1, 2, 3, 4 e 6 processori.
+
+## LFM2.5-350M: il modello compatto
+
+Inferenza per i pesi BF16 ufficiali di LiquidAI/LFM2.5-350M, con attivazioni e accumulazioni FP32, un percorso scalare per le CPU senza AVX2 e verifiche bit per bit contro Transformers. Linux carica i pesi con mmap e usa thread persistenti; il kernel riceve pesi e tokenizer dal bootloader e avvia i propri worker, con la stessa console di Pithos CORE.
+
+### Build e utilizzo
 
 Servono NASM, GNU ld, GNU make 4.3 o successivo e Python 3 con il pacchetto tokenizers per la build. La versione verificata di tokenizers e 0.23.3. Su Linux x86-64, con il client Hugging Face installato, dalla directory dei sorgenti si esegue
 
@@ -57,13 +121,7 @@ Produce gli ID `1098 5706 803 4481 856 5242 523 7`, uno per riga. La chiamata eq
 
 Le modalita diagnostiche `--encode "testo"` e `--decode ID ...` espongono il tokenizer. Encode restituisce gli ID senza BOS implicito e decode omette i token speciali. Entrambe rispettano il numero di token consentito dal contesto configurato e usano le sole tabelle, quindi il percorso del checkpoint puo essere sostituito da `_`.
 
-## LFM3-1.7B
-
-Un secondo eseguibile Linux, `build/lfm3/lfm3-next`, esegue LiquidAI LFM3-1.7B dal GGUF Q4_K_M con le stesse opzioni, condividendo piattaforma, thread, tokenizer e chat. Usa attivazioni Q8_K e prodotti interi con le righe Q4_K e Q6_K, worker paralleli e prefill a blocchi, e offre campionamento, ragionamento, system prompt e statistiche tramite comandi della chat.
-
-Lo stesso runtime si avvia come kernel autonomo, Pithos CORE, da QEMU o dall'immagine `build/lfm3/pithos-core.iso`, con una console grafica Unicode, emoji a colori e tredici layout di tastiera. Build, verifica, interfaccia e differenze rispetto a LFM2.5 sono descritte in [lfm3/README.md](lfm3/README.md).
-
-## Avvio come kernel in QEMU
+### Avvio come kernel in QEMU
 
 Il kernel esegue inferenza e chat senza Linux nel sistema ospite. Multiboot 1 supporta l'avvio diretto di QEMU; Multiboot 2 supporta GRUB in modalita BIOS e UEFI. Il codice configura GDT, paging, long mode, stato SSE/AVX e gestori di eccezione. La cache viene allocata dalla mappa RAM del bootloader; pesi e tokenizer rimangono in memoria.
 
@@ -86,9 +144,9 @@ wsl -d Ubuntu -- /opt/lfm-venv/bin/python os/run.py /opt/lfm-model/lfm-boot.bund
 
 Il launcher assegna sei CPU alla VM e richiede sei worker totali, incluso il processore principale. `--cpus` cambia le CPU virtuali disponibili; `--threads` cambia quelle richieste dal kernel, entrambe da 1 a 16. Le tabelle ACPI MADT individuano i processori, che vengono avviati tramite xAPIC e sequenza INIT/SIPI. Il kernel usa solo le CPU avviate e compatibili con il percorso SIMD scelto; ACPI o xAPIC non supportati lasciano attivo un solo processore. Ogni worker calcola righe complete delle matrici, mantenendo l'ordine delle riduzioni.
 
-L'avvio diretto usa 2.048 posizioni e un massimo di 32 token per risposta. La chat supporta `/clear`, `/quit`, Ctrl-D, CRLF e backspace. `--context` e `--tokens` cambiano i limiti. La RAM predefinita e 2 GiB; `--memory` modifica la memoria della VM. La cache conserva il costo di 24 KiB per posizione. Se la memoria non basta, il kernel stampa un errore e termina.
+L'avvio diretto usa 2.048 posizioni e un massimo di 32 token per risposta. La chat supporta `/clear`, `/quit`, Ctrl-D, CRLF e backspace, e i comandi del motore descritti per il modello principale, tranne il ragionamento. `--context` e `--tokens` cambiano i limiti. La RAM predefinita e 2 GiB; `--memory` modifica la memoria della VM. La cache conserva il costo di 24 KiB per posizione. Se la memoria non basta, il kernel stampa un errore e termina.
 
-`--display gtk` apre la console video, con tastiera PS/2 a disposizione US, Shift, Caps Lock, Ctrl-D e backspace. L'avvio diretto usa VGA testuale; GRUB richiede un framebuffer RGB a 32 bit, normalmente 1024x768. Il font grafico copre Latin-1, inclusi gli accenti italiani; gli altri caratteri appaiono come `?` sullo schermo. COM1 conserva il testo UTF-8 completo. Il font viene generato da DejaVu e la sua licenza e in `os/FONT-LICENSE.txt`. In assenza di una porta seriale, l'inferenza e la console video continuano a funzionare.
+`--display gtk` apre la console video, la stessa console Pithos CORE del modello principale: Unicode con emoji a colori, tredici layout di tastiera, barra di stato e comandi della chat. L'avvio diretto usa VGA testuale; GRUB richiede un framebuffer RGB a 32 bit, normalmente 1024x768. COM1 conserva il testo UTF-8 completo con le stesse sequenze di colore. In assenza di una porta seriale, l'inferenza e la console video continuano a funzionare.
 
 Per una singola risposta o gli ID generati:
 
@@ -99,7 +157,7 @@ python3 os/run.py build/lfm-boot.bundle --mode ids --tokens 8 --prompt "What is 
 
 Le modalita singole delimitano il risultato con `<lfm-output>` e `</lfm-output>` sulla seriale. Il launcher interpreta il dispositivo QEMU `isa-debug-exit`, restituendo zero se il kernel termina correttamente. Con QEMU diretto, il codice host 33 indica successo del guest e 35 indica errore; il codice 1 di un errore di avvio di QEMU resta un errore. Senza KVM si puo specificare `--accel tcg`, ma l'emulazione software dell'inferenza e molto piu lenta.
 
-## Immagine BIOS/UEFI e USB
+### Immagine BIOS/UEFI e USB
 
 ~~~sh
 make os-image MODEL=weights/model.safetensors
@@ -127,7 +185,7 @@ Il percorso da immagine usa QEMU q35 con AHCI/DMA, evitando il caricamento dei p
 
 Il boot e verificato in QEMU, non ancora su un PC fisico. La compatibilita attuale richiede RAM utilizzabile sotto 4 GiB, framebuffer RGB a 32 bit sotto 4 GiB oppure VGA/seriale, e tastiera PS/2 o seriale. Non e incluso un driver USB HID: l'avvio da supporto USB e gestito dal firmware/GRUB e non implica il funzionamento di ogni tastiera USB dopo il boot. Le CPU con x2APIC gia attivo usano il fallback a un core. Console e worker usano attesa attiva; il risparmio energetico in inattivita e ancora da implementare. Su hardware fisico `/quit` arresta i processori, ma non effettua uno spegnimento ACPI.
 
-## Verifiche del kernel
+### Verifiche del kernel
 
 ~~~sh
 make verify-os MODEL=weights/model.safetensors
@@ -161,7 +219,7 @@ Sei CPU hanno dato il risultato migliore fra le configurazioni misurate, circa i
 
 Linux/WSL resta il sistema host che esegue QEMU e gli strumenti di preparazione. I test non equivalgono a una certificazione di compatibilita hardware o a un confronto di velocita con altri runtime.
 
-## Qualita
+### Qualita
 
 Il progetto usa esclusivamente i pesi BF16 ufficiali, con attivazioni e accumulazioni FP32. Questa configurazione ha dato la qualita migliore tra quelle provate e conserva la precisione dei pesi originali. Il checkpoint occupa 708.984.464 byte; cache e buffer richiedono memoria aggiuntiva.
 
@@ -175,7 +233,7 @@ La valutazione usa Transformers in FP32 con i pesi BF16 ufficiali, un BOS per do
 
 La perplexity misurata e 27,44 in italiano, 32,86 in inglese e 29,55 complessivamente. Cinque delle otto risposte rispettano il risultato e il formato richiesti. Il confronto ignora maiuscole, spazi e punti finali; una spiegazione aggiunta quando viene richiesta una sola parola puo quindi risultare non conforme.
 
-## Verifica
+### Verifica
 
 Con PyTorch e Transformers che supporta LFM2 installati, eseguire:
 
@@ -201,7 +259,7 @@ SHA-256 del checkpoint verificato
 1c9c77a4471a7f590f85240f74ed1fc26df7fbde88c3006724e2f93ca993ea4e
 ~~~
 
-## Implementazione
+### Implementazione
 
 - main.asm verifica il modello, esegue gli strati e calcola i logit con la matrice di embedding condivisa.
 - platform_linux.asm gestisce CLI, caricamento dei file, memoria e I/O tramite syscall Linux.

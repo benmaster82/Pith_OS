@@ -2,6 +2,7 @@
 import argparse
 import hashlib
 import os
+import re
 from pathlib import Path
 import selectors
 import subprocess
@@ -14,6 +15,14 @@ from run import command
 BEGIN = b"<lfm-output>\n"
 END = b"\n</lfm-output>\n"
 FRANCE = "What is the capital of France?"
+# The Pithos CORE prompt: an amber mark, then bright user text. COM1 carries
+# the same colour sequences as the screen.
+USER_LABEL = b"\n\x1b[33m\xe2\x80\xba\x1b[1m "
+PLAIN_LABEL = b"\n\xe2\x80\xba "
+
+
+def plain(data):
+    return re.sub(rb"\x1b\[[0-9;]*m", b"", data)
 
 
 def main():
@@ -102,14 +111,14 @@ def main():
 
         def until_prompt():
             deadline = time.monotonic() + 120
-            while b"user> " not in pending:
+            while USER_LABEL not in pending:
                 remaining = deadline - time.monotonic()
                 assert remaining > 0 and selector.select(max(0, remaining)), bytes(pending[-1000:])
                 chunk = os.read(process.stdout.fileno(), 65536)
                 assert chunk, (process.poll(), bytes(pending[-1000:]))
                 pending.extend(chunk)
-            end = pending.index(b"user> ") + len(b"user> ")
-            output = bytes(pending[:end])
+            end = pending.index(USER_LABEL) + len(USER_LABEL)
+            output = plain(bytes(pending[:end]))
             del pending[:end]
             return output
 
@@ -135,8 +144,8 @@ def main():
     lines = ["What is the capital of Francé\x7fe?\r\n".encode(), b"And of Italy?\n", b"\xff\n",
              b"/unknown\n", b"/clear\n", FRANCE.encode() + b"\n"]
     results = chat(lines)
-    actual = b"".join(part.split(b"assistant> ", 1)[1][:-len(b"user> ")]
-                      for part in results if b"assistant> " in part)
+    # Each answer follows the echoed line and precedes the next prompt.
+    actual = b"".join(results[index].split(b"\n", 1)[1][:-len(PLAIN_LABEL)] for index in (0, 1, 5))
     expected = linux(["--chat", 16], data=(FRANCE + "\nAnd of Italy?\n/clear\n" + FRANCE + "\n/quit\n").encode())
     assert actual == expected, (actual, expected)
     assert b"Input rejected" in results[2] and b"Unknown command" in results[3]
@@ -145,7 +154,7 @@ def main():
 
     lines = [FRANCE.encode() + b"\n", FRANCE.encode() + b"\n", b"/clear\n", FRANCE.encode() + b"\n"]
     results = chat(lines, tokens=1, context=19)
-    assert b"assistant> " in results[0] and b"Context full" in results[1]
+    assert b"token limit" in results[0] and b"Context full" in results[1]
     assert results[0] == results[3] and b"token limit" in results[3]
     print("Exact cache capacity rejects another turn and recovers after /clear", flush=True)
 

@@ -2,6 +2,7 @@
 import argparse
 import json
 import os
+import re
 from pathlib import Path
 import selectors
 import socket
@@ -11,6 +12,15 @@ import tempfile
 import time
 
 from run import command, media_command
+
+# The Pithos CORE prompt: an amber mark, then bright user text. COM1 carries
+# the same colour sequences as the screen.
+USER_LABEL = b"\n\x1b[33m\xe2\x80\xba\x1b[1m "
+PLAIN_LABEL = b"\n\xe2\x80\xba "
+
+
+def plain(data):
+    return re.sub(rb"\x1b\[[0-9;]*m", b"", data)
 
 
 class Guest:
@@ -65,7 +75,7 @@ class Guest:
             if "return" in response:
                 return response["return"]
 
-    def until(self, marker=b"user> ", timeout=180):
+    def until(self, marker=USER_LABEL, timeout=180):
         deadline = time.monotonic() + timeout
         while marker not in self.pending:
             remaining = deadline - time.monotonic()
@@ -143,7 +153,7 @@ def main():
             assert b"Active CPU cores: 4\n" in guest.until()
             guest.key("What is the capital of Francx\be?\n")
             output = guest.until()
-            assert b"assistant> The capital of France is Paris.\n" in output, output
+            assert b"The capital of France is Paris.\n" in plain(output), output
             guest.screenshot("build/os-vga.png")
             guest.key("/clear\n")
             assert b"Conversation cleared" in guest.until()
@@ -185,7 +195,7 @@ def main():
                 assert b"Active CPU cores: 4\n" in output, (name, output[-1000:])
                 guest.key(france + "\n")
                 output = guest.until()
-                assert b"assistant> The capital of France is Paris.\n" in output, (name, output)
+                assert b"The capital of France is Paris.\n" in plain(output), (name, output)
                 guest.screenshot(f"build/os-{name}.png")
                 guest.serial(b"/clear\n")
                 assert b"Conversation cleared" in guest.until()

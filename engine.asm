@@ -1,7 +1,8 @@
-; LFM3 engine options shared by Linux and Pithos CORE: sampling, reasoning,
-; a system prompt, statistics and the chat commands. Greedy decoding stays
-; the default and uses the verified argmax path, so default outputs do not
-; change. Functions preserve rbx, rbp and r12-r15.
+; Engine options shared by both models, on Linux and Pithos CORE: sampling,
+; reasoning (LFM3), a system prompt, statistics and the chat commands. Greedy
+; decoding stays the default and uses the verified argmax path, so default
+; outputs do not change. VOCAB_SIZE is the logits length; THINK_OPEN and
+; THINK_CLOSE enable reasoning. Functions preserve rbx, rbp and r12-r15.
 %define RECENT 64                   ; tokens considered by the repetition penalty
 %define CANDIDATES 128              ; top-k ceiling
 %define SYSTEM_BYTES 1024
@@ -32,7 +33,7 @@ choose_token:
     mov eax,ecx
 .next:
     inc ecx
-    cmp ecx,128000
+    cmp ecx,VOCAB_SIZE
     jb .argmax
     ret
 
@@ -123,7 +124,7 @@ sample_token:
     mov [candidate_ids+rdx*4],ecx
 .scanned:
     inc ecx
-    cmp ecx,128000
+    cmp ecx,VOCAB_SIZE
     jb .scan
     ; p_j = exp((l_j - l_0) / T); p_0 = 1.
     xor ebx,ebx
@@ -363,7 +364,11 @@ engine_turn_end:
     ret
 
 ; eax = token in text mode. Reasoning is shown dim, or collapsed into a count.
+; Models without reasoning tokens (no THINK_OPEN) only decode.
 engine_emit:
+%ifndef THINK_OPEN
+    jmp decode_token
+%else
     cmp eax,THINK_OPEN
     je .open
     cmp eax,THINK_CLOSE
@@ -417,6 +422,7 @@ engine_emit:
     jmp write_all
 .done:
     ret
+%endif
 
 ; Text builders: rdi = cursor, return rdi advanced.
 put_text:
@@ -550,6 +556,7 @@ engine_status_text:
     mov esi,separator
     call put_text
     call put_sampling_short
+%ifdef THINK_OPEN
     mov esi,think_off_text
     cmp byte [think_mode],0
     je .think
@@ -558,6 +565,7 @@ engine_status_text:
     call put_text
     mov esi,separator
     call put_text
+%endif
     mov eax,[thread_count]
     call put_uint
     mov esi,cores_text
@@ -735,11 +743,13 @@ command_dispatch:
     call take_word
     test eax,eax
     jnz .set
+%ifdef THINK_OPEN
     mov esi,chat_line
     mov edi,think_command
     call take_word
     test eax,eax
     jnz .think
+%endif
     mov esi,chat_line
     mov edi,system_command
     call take_word
@@ -1066,12 +1076,14 @@ engine_prefix:
 ; empty reasoning block unless reasoning is on.
 engine_suffix:
     mov esi,template_assistant
+%ifdef THINK_OPEN
     call copy_text
     mov esi,template_no_think
     cmp byte [think_mode],0
     je .copy
     mov esi,template_think
 .copy:
+%endif
     jmp copy_text
 
 section .rodata
@@ -1105,8 +1117,10 @@ help_text:
     db "  /set                 show sampling settings",10
     db "  /set temp 0.7        temperature; 0 is greedy (default)",10
     db "  /set top-k 50        top-p 0.95  min-p 0.05  repeat 1.1  seed 42  tokens 256",10
+%ifdef THINK_OPEN
     db "  /think on|off        let the model reason before answering",10
     db "  /think show|hide     show the reasoning or only its length",10
+%endif
     db "  /system TEXT         set the system prompt and restart (empty clears it)",10
     db "  /stats               speed, context and settings",10
 %ifdef PITHOS_UI
