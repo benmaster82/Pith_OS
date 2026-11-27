@@ -1,8 +1,32 @@
-# Pithos CORE
+<p align="center">
+  <img src="docs/banner.svg" width="820" alt="Pithos CORE: language models in x86-64 assembly, on Linux and bare metal">
+</p>
 
-LiquidAI language models in x86-64 NASM, on Linux and as a standalone operating system.
+<p align="center">
+  <b>LiquidAI language models in x86-64 NASM, on Linux and as a standalone operating system.</b><br>
+  LFM3-1.7B and LFM2.5-350M with no libc, booting from BIOS or UEFI into a Unicode chat console.
+</p>
 
-[Italiano](README.it.md)
+<p align="center">
+  <img alt="NASM x86-64 assembly" src="https://img.shields.io/badge/NASM-x86--64%20assembly-7c5cf6">
+  <img alt="Runtime with no libc and no Python" src="https://img.shields.io/badge/runtime-no%20libc%2C%20no%20Python-ec5c8c">
+  <img alt="Runs on Linux and on bare metal with BIOS or UEFI" src="https://img.shields.io/badge/runs%20on-Linux%20%7C%20bare%20metal%20BIOS%20%26%20UEFI-f5a05a">
+  <a href="#lfm3-17b-the-main-model"><img alt="Model LFM3-1.7B Q4_K_M" src="https://img.shields.io/badge/model-LFM3--1.7B%20Q4__K__M-6366f1"></a>
+  <a href="#lfm25-350m-the-compact-model"><img alt="Model LFM2.5-350M BF16" src="https://img.shields.io/badge/model-LFM2.5--350M%20BF16-8b5cf6"></a>
+  <img alt="AVX2 and FMA, up to 16 CPUs" src="https://img.shields.io/badge/SIMD-AVX2%20%7C%20FMA%2C%20up%20to%2016%20CPUs-14b8a6">
+  <a href="#console-and-commands"><img alt="Console with Unicode, colour emoji and 13 keyboard layouts" src="https://img.shields.io/badge/console-Unicode%2C%20colour%20emoji%2C%2013%20layouts-6b7280"></a>
+  <a href="#verification"><img alt="Verified against Transformers" src="https://img.shields.io/badge/verified-against%20Transformers-2ea043"></a>
+  <img alt="Last commit" src="https://img.shields.io/github/last-commit/benmaster82/Pith_OS?color=3b82f6">
+</p>
+
+<p align="center">
+  <a href="#build-and-usage">Quick start</a> ·
+  <a href="#pithos-core-in-qemu-from-cd-or-usb">Boot from CD or USB</a> ·
+  <a href="#console-and-commands">Console</a> ·
+  <a href="#performance">Performance</a> ·
+  <a href="lfm3/README.md">LFM3 internals</a> ·
+  <a href="README.it.md">Italiano</a>
+</p>
 
 ![Pithos CORE running LFM3-1.7B: chat with Chinese, Japanese, Korean and colour emoji](docs/screenshots/pithos-core-chat.png)
 
